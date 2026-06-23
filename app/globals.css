@@ -1,0 +1,71 @@
+@import url("https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Scheherazade+New:wght@400;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* kept in sync with tailwind.config.ts colors so focus rings,
+     selection, and the scrollbar match the same gold/ink everywhere */
+  --ink: 12 10 9;
+  --ink-soft: 28 25 23;
+  --gold: 212 175 55;
+  --gold-soft: 229 199 107;
+  --verdant: 95 141 110;
+  --parchment: 245 240 232;
+  --parchment-muted: 168 162 158;
+}
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-color: rgb(var(--gold)) rgb(var(--ink));
+  scrollbar-width: thin;
+}
+
+body {
+  background-color: rgb(var(--ink));
+  color: rgb(var(--parchment));
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background-color: rgb(var(--gold) / 0.35);
+  color: rgb(var(--parchment));
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--gold));
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(var(--ink));
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--gold));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--gold-soft));
+}
+
+[dir="rtl"] .font-display {
+  letter-spacing: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
