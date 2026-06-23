@@ -77,7 +77,7 @@ const translations = {
     },
     hero: {
       arabicTitle: "القرآن الكريم",
-      subtitle: "A sadaqa jariya project — free, always",
+      subtitle: "A sadaqah jariyah project — free, always",
       title:
         "Give the Qur'an a voice<br/><span class='text-gold'>worth sharing.</span>",
       description:
@@ -105,7 +105,7 @@ const translations = {
             "No timelines, no exports, no waiting. Your video renders in seconds, ready for every platform.",
         },
         {
-          title: "Sadaqa Jariya",
+          title: "Sadaqah Jariyah",
           description:
             "Every share is a seed of reward. We take no payment — this is a trust from Allah ﷻ.",
         },
@@ -132,7 +132,7 @@ const translations = {
     },
     hero: {
       arabicTitle: "القرآن الكريم",
-      subtitle: "Un projet de sadaqa jariya — gratuit, pour toujours",
+      subtitle: "Un projet de sadaqah jariyah — gratuit, pour toujours",
       title:
         "Donnez au Coran une voix<br/><span class='text-gold'>digne d'être partagée.</span>",
       description:
@@ -160,7 +160,7 @@ const translations = {
             "Pas de timelines, pas d'exports, pas d'attente. Votre vidéo se génère en secondes, prête pour toutes les plateformes.",
         },
         {
-          title: "Sadaqa Jariya",
+          title: "Sadaqah Jariyah",
           description:
             "Chaque partage est une graine de récompense. Nous ne prenons aucun paiement — c'est un amanah d'Allah ﷻ.",
         },

@@ -32,6 +32,11 @@ const config: Config = {
         "glow-pulse": "glowPulse 4s ease-in-out infinite",
         "spin-slow": "spin 60s linear infinite",
         "spin-slow-reverse": "spin 45s linear infinite reverse",
+        shimmer: "shimmer 20s linear infinite",
+        "float-1": "float1 12s ease-in-out infinite",
+        "float-2": "float2 15s ease-in-out infinite",
+        "float-3": "float3 18s ease-in-out infinite",
+        "shamsah-pulse": "shamsahPulse 6s ease-in-out infinite",
       },
       keyframes: {
         fadeUp: {
@@ -45,6 +50,32 @@ const config: Config = {
         glowPulse: {
           "0%, 100%": { opacity: "0.4" },
           "50%": { opacity: "0.8" },
+        },
+        shimmer: {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        float1: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "25%": { transform: "translate(30px, -40px) scale(1.1)" },
+          "50%": { transform: "translate(-20px, -20px) scale(0.95)" },
+          "75%": { transform: "translate(15px, 30px) scale(1.05)" },
+        },
+        float2: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "33%": { transform: "translate(-40px, 25px) scale(1.15)" },
+          "66%": { transform: "translate(25px, -35px) scale(0.9)" },
+        },
+        float3: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "20%": { transform: "translate(20px, 30px) scale(1.08)" },
+          "40%": { transform: "translate(-30px, 10px) scale(0.92)" },
+          "60%": { transform: "translate(10px, -25px) scale(1.05)" },
+          "80%": { transform: "translate(-15px, 20px) scale(0.98)" },
+        },
+        shamsahPulse: {
+          "0%, 100%": { opacity: "0.5", transform: "scale(1)" },
+          "50%": { opacity: "1", transform: "scale(1.05)" },
         },
       },
     },

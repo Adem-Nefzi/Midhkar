@@ -1,11 +1,10 @@
 "use client";
-
-import { Features } from "@/components/Features";
-import { QuranPreview } from "@/components/QuranPreview";
-import { Footer } from "@/components/Footer";
-import { I18nProvider } from "./lib/i18n";
 import { Navbar } from "@/components/navbar";
 import { Hero } from "@/components/hero";
+import { I18nProvider } from "@/lib/i18n";
+import { Features } from "@/components/features";
+import { Footer } from "@/components/footer";
+import { QuranPreview } from "@/components/QuranPreview";
 
 export default function HomePage() {
   return (

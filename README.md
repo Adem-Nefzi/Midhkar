@@ -1,6 +1,6 @@
 # Midhkar
 
-Turn Qur'an verses into short, shareable videos — built as a sadaqa jariya.
+Turn Qur'an verses into short, shareable videos — built as a sadaqah jariyah.
 
 ## Stack in this scaffold
 
@@ -12,6 +12,7 @@ Turn Qur'an verses into short, shareable videos — built as a sadaqa jariya.
 ## Run it locally
 
 1. Install dependencies:
+
    ```bash
    npm install
    ```
@@ -19,11 +20,13 @@ Turn Qur'an verses into short, shareable videos — built as a sadaqa jariya.
 2. Create a free Clerk application at https://dashboard.clerk.com, then copy
    `.env.local.example` to `.env.local` and paste in your Publishable Key and
    Secret Key:
+
    ```bash
    cp .env.local.example .env.local
    ```
 
 3. Start the dev server:
+
    ```bash
    npm run dev
    ```

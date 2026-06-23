@@ -1,17 +1,16 @@
+"use client";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { Navbar } from "@/components/navbar";
+import { VideoBuilder } from "@/components/VideoBuilder";
+import { I18nProvider } from "@/lib/i18n";
 
 export default function CreatePage() {
   return (
-    <main className="min-h-screen">
-      <Navbar />
-      <div className="mx-auto max-w-2xl px-6 py-32 text-center">
-        <h1 className="font-display text-3xl text-parchment">
-          The video builder is on its way.
-        </h1>
-        <p className="mt-4 text-parchment-muted">
-          We&rsquo;re still putting this part together. Check back soon.
-        </p>
-      </div>
-    </main>
+    <I18nProvider>
+      <main className="min-h-screen bg-ink text-parchment antialiased selection:bg-gold/30 selection:text-ink">
+        <LocaleSwitcher />
+        <VideoBuilder />
+      </main>
+    </I18nProvider>
   );
 }

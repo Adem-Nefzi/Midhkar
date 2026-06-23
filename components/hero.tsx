@@ -2,146 +2,423 @@
 
 import Link from "next/link";
 import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
-import { useI18n } from "@/app/lib/i18n";
+import { useI18n } from "@/lib/i18n";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export function Hero() {
   const { t, dir, locale } = useI18n();
-  const [loaded, setLoaded] = useState(false);
+  const verse = t("hero.verse");
+  const hasVerse = typeof verse === "string" && verse !== "hero.verse";
+  const containerRef = useRef<HTMLElement>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoaded(true), 100);
-    return () => clearTimeout(timer);
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setMousePos({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
   }, []);
 
-  const isRTL = dir === "rtl";
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener("mousemove", handleMouseMove);
+    return () => el.removeEventListener("mousemove", handleMouseMove);
+  }, [handleMouseMove]);
 
   return (
-    <section className="relative overflow-hidden">
-      {/* Background layers */}
+    <section
+      ref={containerRef}
+      className="relative overflow-hidden"
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
+    >
+      {/* ============================================================
+          BASE BACKGROUND
+      ============================================================ */}
       <div className="absolute inset-0 bg-ink" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-gold/[0.03] via-transparent to-transparent" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-verdant/[0.02] via-transparent to-transparent" />
 
-      {/* Geometric pattern overlay */}
+      {/* ============================================================
+          CENTRAL SHAMSAH — Large sunburst medallion
+          Like opening a Qur'an to a carpet page
+      ============================================================ */}
+      <div className="absolute left-1/2 top-1/2 h-[900px] w-[900px] -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute inset-0 animate-shamsah-pulse rounded-full bg-gradient-radial from-gold/[0.06] via-gold/[0.02] to-transparent" />
+        <div className="absolute left-1/2 top-1/2 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gold/[0.04] blur-[80px]" />
+      </div>
+
+      {/* ============================================================
+          CORNER QUARTER-MEDALLIONS
+          Like the four corners of a Qur'an carpet page
+      ============================================================ */}
+      <div className="absolute -top-10 -left-10 h-[350px] w-[350px] opacity-60">
+        <QuarterMedallion />
+      </div>
+      <div className="absolute -top-10 -right-10 h-[350px] w-[350px] opacity-60 rotate-90">
+        <QuarterMedallion />
+      </div>
+      <div className="absolute -bottom-10 -left-10 h-[350px] w-[350px] opacity-60 -rotate-90">
+        <QuarterMedallion />
+      </div>
+      <div className="absolute -bottom-10 -right-10 h-[350px] w-[350px] opacity-60 rotate-180">
+        <QuarterMedallion />
+      </div>
+
+      {/* ============================================================
+          ARABESQUE BORDER FRAME — Much more prominent
+      ============================================================ */}
+      <div className="absolute inset-6 sm:inset-10 md:inset-14 pointer-events-none">
+        {/* Triple border like a Qur'an frame */}
+        <div className="absolute inset-0 border-2 border-gold/20" />
+        <div className="absolute inset-2 border border-gold/10" />
+        <div className="absolute inset-3 border border-gold/5" />
+
+        {/* Large corner ornaments */}
+        <CornerOrnamentLarge position="top-left" />
+        <CornerOrnamentLarge position="top-right" />
+        <CornerOrnamentLarge position="bottom-left" />
+        <CornerOrnamentLarge position="bottom-right" />
+
+        {/* Side arabesque scrollwork */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 h-10 w-48 -translate-y-1/2">
+          <svg
+            viewBox="0 0 192 40"
+            className="h-full w-full"
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M0,20 Q24,0 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1.2"
+              className="stroke-gold/40"
+            />
+            <path
+              d="M0,20 Q24,40 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1"
+              className="stroke-gold/25"
+            />
+            <path
+              d="M0,20 Q24,10 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="0.6"
+              className="stroke-gold/15"
+            />
+          </svg>
+        </div>
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 h-10 w-48 translate-y-1/2 rotate-180">
+          <svg
+            viewBox="0 0 192 40"
+            className="h-full w-full"
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M0,20 Q24,0 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1.2"
+              className="stroke-gold/40"
+            />
+            <path
+              d="M0,20 Q24,40 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1"
+              className="stroke-gold/25"
+            />
+          </svg>
+        </div>
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 h-48 w-10 -translate-x-1/2 -rotate-90">
+          <svg
+            viewBox="0 0 192 40"
+            className="h-full w-full"
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M0,20 Q24,0 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1.2"
+              className="stroke-gold/30"
+            />
+          </svg>
+        </div>
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 h-48 w-10 translate-x-1/2 rotate-90">
+          <svg
+            viewBox="0 0 192 40"
+            className="h-full w-full"
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M0,20 Q24,0 48,20 T96,20 T144,20 T192,20"
+              fill="none"
+              strokeWidth="1.2"
+              className="stroke-gold/30"
+            />
+          </svg>
+        </div>
+      </div>
+
+      {/* ============================================================
+          GIRIH STAR TESSELLATION — More visible
+      ============================================================ */}
+      <div className="absolute inset-0 opacity-[0.06]">
+        <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern
+              id="girih-hero"
+              x="0"
+              y="0"
+              width="100"
+              height="100"
+              patternUnits="userSpaceOnUse"
+            >
+              {/* 8-pointed star */}
+              <path
+                d="M50,8 L55,42 L92,30 L62,50 L88,82 L50,60 L12,82 L38,50 L8,30 L45,42 Z"
+                fill="none"
+                stroke="#d4af37"
+                strokeWidth="0.6"
+              />
+              {/* Connecting lines */}
+              <path
+                d="M50,0 L50,8 M50,60 L50,100 M0,50 L8,50 M92,50 L100,50"
+                stroke="#d4af37"
+                strokeWidth="0.3"
+              />
+              {/* Interlacing */}
+              <path
+                d="M30,30 L70,70 M70,30 L30,70"
+                stroke="#d4af37"
+                strokeWidth="0.25"
+              />
+              {/* Small center octagon */}
+              <path
+                d="M50,35 L58,42 L58,58 L50,65 L42,58 L42,42 Z"
+                fill="none"
+                stroke="#d4af37"
+                strokeWidth="0.3"
+              />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#girih-hero)" />
+        </svg>
+      </div>
+
+      {/* ============================================================
+          ILLUMINATED GRID — Manuscript ruling lines
+      ============================================================ */}
+      <div className="absolute inset-0">
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(212,175,55,0.04) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(212,175,55,0.04) 1px, transparent 1px)
+            `,
+            backgroundSize: "80px 80px",
+          }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(212,175,55,0.015) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(212,175,55,0.015) 1px, transparent 1px)
+            `,
+            backgroundSize: "20px 20px",
+          }}
+        />
+        {/* Gold dots at intersections */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `radial-gradient(circle, rgba(212,175,55,0.18) 1.5px, transparent 1.5px)`,
+            backgroundSize: "80px 80px",
+            backgroundPosition: "-1px -1px",
+          }}
+        />
+      </div>
+
+      {/* ============================================================
+          FLOATING ARABESQUE ORBS
+      ============================================================ */}
+      <div className="absolute top-[15%] left-[10%] h-[200px] w-[200px] animate-float-1 rounded-full bg-gold/[0.04] blur-[80px]" />
+      <div className="absolute top-[65%] right-[15%] h-[250px] w-[250px] animate-float-2 rounded-full bg-gold/[0.03] blur-[90px]" />
+      <div className="absolute bottom-[20%] left-[35%] h-[180px] w-[180px] animate-float-3 rounded-full bg-verdant/[0.03] blur-[70px]" />
+
+      {/* ============================================================
+          MOUSE-TRACKING NUR SPOTLIGHT
+      ============================================================ */}
       <div
-        className="absolute inset-0 opacity-[0.03]"
+        className="pointer-events-none absolute inset-0 transition-opacity duration-700"
+        style={{ opacity: isHovering ? 1 : 0 }}
+      >
+        <div
+          className="absolute h-[700px] w-[700px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            left: mousePos.x,
+            top: mousePos.y,
+            background:
+              "radial-gradient(circle, rgba(212,175,55,0.08) 0%, rgba(212,175,55,0.03) 40%, transparent 70%)",
+            filter: "blur(60px)",
+          }}
+        />
+        <div
+          className="absolute h-[300px] w-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            left: mousePos.x,
+            top: mousePos.y,
+            background:
+              "radial-gradient(circle, rgba(212,175,55,0.12) 0%, transparent 55%)",
+            filter: "blur(30px)",
+          }}
+        />
+        <div
+          className="absolute h-[120px] w-[120px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            left: mousePos.x,
+            top: mousePos.y,
+            background:
+              "radial-gradient(circle, rgba(245,240,232,0.08) 0%, transparent 45%)",
+            filter: "blur(15px)",
+          }}
+        />
+      </div>
+
+      {/* ============================================================
+          STATIC CONTENT ILLUMINATION
+      ============================================================ */}
+      <div className="absolute left-[12%] top-[32%] h-[280px] w-[450px] rounded-full bg-gold/[0.03] blur-[100px]" />
+      <div className="absolute left-[8%] bottom-[22%] h-[180px] w-[350px] rounded-full bg-gold/[0.02] blur-[70px]" />
+
+      {/* ============================================================
+          HORIZONTAL LIGHT RAYS
+      ============================================================ */}
+      <div className="absolute top-[25%] left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-gold/[0.07] to-transparent" />
+      <div className="absolute top-[50%] left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-gold/[0.05] to-transparent" />
+      <div className="absolute top-[75%] left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-gold/[0.06] to-transparent" />
+
+      {/* ============================================================
+          AURORA SHIMMER
+      ============================================================ */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div
+          className="absolute -inset-[100%] animate-shimmer"
+          style={{
+            background: `
+              conic-gradient(
+                from 0deg at 50% 50%,
+                transparent 0deg,
+                rgba(212,175,55,0.02) 60deg,
+                transparent 120deg,
+                rgba(95,141,110,0.015) 180deg,
+                transparent 240deg,
+                rgba(212,175,55,0.02) 300deg,
+                transparent 360deg
+              )
+            `,
+          }}
+        />
+      </div>
+
+      {/* ============================================================
+          VIGNETTE
+      ============================================================ */}
+      <div
+        className="absolute inset-0"
         style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0L33.5 26.5L60 30L33.5 33.5L30 60L26.5 33.5L0 30L26.5 26.5Z' fill='none' stroke='%23d4af37' stroke-width='0.5'/%3E%3C/svg%3E")`,
-          backgroundSize: "60px 60px",
+          background:
+            "radial-gradient(ellipse at center, transparent 0%, transparent 35%, rgba(12,10,9,0.55) 100%)",
         }}
       />
 
+      {/* ============================================================
+          ROSSETTE MOTIF
+      ============================================================ */}
       <RosetteMotif />
 
-      <div className="relative z-10 mx-auto flex max-w-4xl flex-col items-center px-6 py-24 text-center sm:py-32 lg:py-40">
-        {/* Arabic title with decorative line */}
-        <div
-          className={`relative inline-block ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-1000`}
-        >
+      {/* ============================================================
+          CONTENT
+      ============================================================ */}
+      <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center px-6 py-28 text-center sm:py-36">
+        {/* Bismillah header */}
+        <div className="relative inline-block mb-6">
           <p
             dir="rtl"
             lang="ar"
-            className="font-arabic text-3xl text-gold sm:text-4xl md:text-5xl leading-relaxed"
-            style={{ fontFamily: "'Amiri', 'Scheherazade New', serif" }}
+            className="animate-fade-up font-arabic text-3xl text-gold opacity-0 sm:text-4xl md:text-5xl"
+            style={{
+              fontFamily: "'Amiri', 'Scheherazade New', serif",
+              textShadow: "0 0 40px rgba(212,175,55,0.2)",
+            }}
           >
-            {t("hero.arabicTitle") as string}
+            {t("hero.arabicTitle")}
           </p>
-          <span
-            className={`absolute -bottom-2 h-px bg-gradient-to-r from-transparent via-gold/60 to-transparent ${
-              isRTL ? "right-0 left-0" : "left-0 right-0"
-            }`}
-          />
+          <span className="absolute -bottom-3 left-0 right-0 h-px origin-center scale-x-0 animate-draw-line bg-gradient-to-r from-transparent via-gold/60 to-transparent [animation-delay:550ms]" />
         </div>
 
         {/* Subtitle */}
-        <p
-          className={`mt-6 text-xs uppercase tracking-[0.25em] text-parchment-muted/80 ${loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"} transition-all duration-700 delay-200`}
-        >
-          {t("hero.subtitle") as string}
+        <p className="mt-4 animate-fade-up text-xs uppercase tracking-[0.3em] text-parchment-muted/60 opacity-0 [animation-delay:120ms]">
+          {t("hero.subtitle")}
         </p>
 
         {/* Main headline */}
         <h1
-          className={`mt-8 font-display text-4xl font-medium leading-[1.15] text-parchment sm:text-5xl md:text-6xl lg:text-7xl ${loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"} transition-all duration-700 delay-300`}
-        >
-          {locale === "ar" ? (
-            <span style={{ fontFamily: "'Amiri', 'Scheherazade New', serif" }}>
-              {t("hero.title") as string}
-            </span>
-          ) : (
-            <span
-              dangerouslySetInnerHTML={{ __html: t("hero.title") as string }}
-            />
-          )}
-        </h1>
+          className="mt-8 animate-fade-up font-display text-4xl font-medium leading-[1.1] text-parchment opacity-0 sm:text-5xl md:text-6xl [animation-delay:220ms]"
+          dangerouslySetInnerHTML={{ __html: t("hero.title") }}
+        />
 
         {/* Description */}
-        <p
-          className={`mt-6 max-w-2xl text-lg leading-relaxed text-parchment-muted sm:text-xl ${loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"} transition-all duration-700 delay-400`}
-        >
-          {t("hero.description") as string}
+        <p className="mt-6 max-w-xl animate-fade-up text-lg leading-relaxed text-parchment-muted opacity-0 [animation-delay:340ms]">
+          {t("hero.description")}
         </p>
 
-        {/* Quranic verse card */}
-        <div
-          className={`mt-10 max-w-xl rounded-2xl border border-gold/10 bg-parchment/[0.02] p-6 backdrop-blur-sm ${loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"} transition-all duration-700 delay-500`}
-        >
-          <div className="flex flex-col items-center gap-3">
-            <svg
-              className="h-5 w-5 text-gold/60"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
-            </svg>
+        {/* Quranic verse — illuminated manuscript style */}
+        {hasVerse && (
+          <blockquote
+            dir="rtl"
+            className="mt-10 animate-fade-up relative rounded-sm border-2 border-gold/20 bg-gradient-to-b from-gold/[0.03] to-transparent p-8 opacity-0 [animation-delay:380ms]"
+          >
+            {/* Ornate corner marks */}
+            <div className="absolute top-0 left-0 h-6 w-6 border-t-2 border-l-2 border-gold/30" />
+            <div className="absolute top-0 right-0 h-6 w-6 border-t-2 border-r-2 border-gold/30" />
+            <div className="absolute bottom-0 left-0 h-6 w-6 border-b-2 border-l-2 border-gold/30" />
+            <div className="absolute bottom-0 right-0 h-6 w-6 border-b-2 border-r-2 border-gold/30" />
+            {/* Inner corner accents */}
+            <div className="absolute top-2 left-2 h-3 w-3 border-t border-l border-gold/15" />
+            <div className="absolute top-2 right-2 h-3 w-3 border-t border-r border-gold/15" />
+            <div className="absolute bottom-2 left-2 h-3 w-3 border-b border-l border-gold/15" />
+            <div className="absolute bottom-2 right-2 h-3 w-3 border-b border-r border-gold/15" />
+
             <p
-              dir="rtl"
               lang="ar"
-              className="text-lg text-parchment/90 leading-relaxed"
+              className="font-arabic text-2xl leading-relaxed text-parchment/95"
               style={{ fontFamily: "'Amiri', 'Scheherazade New', serif" }}
             >
-              {t("hero.verse") as string}
+              {verse}
             </p>
-            <p className="text-xs text-gold/70 tracking-wide uppercase">
-              {t("hero.verseRef") as string}
-            </p>
-          </div>
-        </div>
+            <cite
+              dir="ltr"
+              className="mt-4 block text-sm not-italic text-gold/60 tracking-wide"
+            >
+              {t("hero.verseRef")}
+            </cite>
+          </blockquote>
+        )}
 
         {/* CTA Buttons */}
-        <div
-          className={`mt-10 flex flex-wrap items-center justify-center gap-4 ${loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"} transition-all duration-700 delay-600`}
-        >
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 animate-fade-up opacity-0 [animation-delay:460ms]">
           <SignedOut>
             <SignUpButton mode="modal">
-              <button className="group relative cursor-pointer overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20">
+              <button className="group relative cursor-pointer overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20">
                 <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-                <span className="relative flex items-center gap-2">
-                  {t("hero.ctaPrimary") as string}
-                  <svg
-                    className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d={
-                        isRTL
-                          ? "M19 12H5M12 19l-7-7 7-7"
-                          : "M17 8l4 4m0 0l-4 4m4-4H3"
-                      }
-                    />
-                  </svg>
-                </span>
+                <span className="relative">{t("hero.ctaPrimary")}</span>
               </button>
             </SignUpButton>
             <SignInButton mode="modal">
-              <button className="cursor-pointer rounded-full border border-parchment/20 px-8 py-3.5 text-sm text-parchment transition-all duration-300 hover:border-gold/50 hover:text-gold hover:bg-gold/5">
-                {t("hero.ctaSecondary") as string}
+              <button className="cursor-pointer rounded-full border-2 border-parchment/20 px-8 py-3.5 text-sm text-parchment transition hover:border-gold/50 hover:text-gold hover:bg-gold/5">
+                {t("hero.ctaSecondary")}
               </button>
             </SignInButton>
           </SignedOut>
@@ -149,63 +426,141 @@ export function Hero() {
           <SignedIn>
             <Link
               href="/create"
-              className="group relative inline-block overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20"
+              className="group relative inline-block overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20"
             >
               <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-              <span className="relative flex items-center gap-2">
-                {t("hero.ctaPrimary") as string}
-                <svg
-                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 8l4 4m0 0l-4 4m4-4H3"
-                  />
-                </svg>
-              </span>
+              <span className="relative">{t("hero.ctaPrimary")}</span>
             </Link>
           </SignedIn>
-        </div>
-
-        {/* Scroll indicator */}
-        <div
-          className={`mt-16 ${loaded ? "opacity-100" : "opacity-0"} transition-opacity duration-1000 delay-1000`}
-        >
-          <div className="flex flex-col items-center gap-2 text-parchment-muted/40">
-            <span className="text-[10px] uppercase tracking-[0.3em]">
-              {locale === "ar"
-                ? "استكشف"
-                : locale === "fr"
-                  ? "Explorer"
-                  : "Explore"}
-            </span>
-            <div className="h-8 w-px bg-gradient-to-b from-parchment-muted/40 to-transparent animate-pulse" />
-          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function RosetteMotif() {
-  const { dir } = useI18n();
-  const isRTL = dir === "rtl";
+/* ================================================================
+   QUARTER MEDALLION — Carpet page corner motif
+   ================================================================ */
+function QuarterMedallion() {
+  return (
+    <svg viewBox="0 0 200 200" className="h-full w-full">
+      {/* Outer arc */}
+      <path
+        d="M200,0 A200,200 0 0,0 0,200"
+        fill="none"
+        strokeWidth="1"
+        className="stroke-gold/20"
+      />
+      <path
+        d="M180,0 A180,180 0 0,0 0,180"
+        fill="none"
+        strokeWidth="0.8"
+        className="stroke-gold/15"
+      />
+      {/* Radiating lines */}
+      {[...Array(12)].map((_, i) => {
+        const angle = (i * 15 * Math.PI) / 180;
+        const x = 200 - Math.cos(angle) * 200;
+        const y = 200 - Math.sin(angle) * 200;
+        return (
+          <line
+            key={i}
+            x1="200"
+            y1="200"
+            x2={x}
+            y2={y}
+            strokeWidth="0.3"
+            className="stroke-gold/10"
+          />
+        );
+      })}
+      {/* Inner star */}
+      <path
+        d="M200,60 L170,100 L200,140 L160,130 L140,170 L130,130 L90,140 L120,100 L90,60 L130,70 L140,30 L160,70 Z"
+        fill="none"
+        strokeWidth="0.6"
+        className="stroke-gold/20"
+      />
+    </svg>
+  );
+}
 
+/* ================================================================
+   LARGE CORNER ORNAMENT — 8-point star with arabesque
+   ================================================================ */
+function CornerOrnamentLarge({
+  position,
+}: {
+  position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+}) {
+  const posClasses = {
+    "top-left": "-top-4 -left-4",
+    "top-right": "-top-4 -right-4",
+    "bottom-left": "-bottom-4 -left-4",
+    "bottom-right": "-bottom-4 -right-4",
+  };
+
+  const rotateClasses = {
+    "top-left": "",
+    "top-right": "rotate-90",
+    "bottom-left": "-rotate-90",
+    "bottom-right": "rotate-180",
+  };
+
+  return (
+    <div className={`absolute ${posClasses[position]}`}>
+      <svg
+        viewBox="0 0 64 64"
+        className={`h-10 w-10 sm:h-12 sm:w-12 ${rotateClasses[position]}`}
+      >
+        {/* Outer 8-point star */}
+        <path
+          d="M32,4 L36,24 L56,20 L40,32 L56,44 L36,40 L32,60 L28,40 L8,44 L24,32 L8,20 L28,24 Z"
+          fill="none"
+          strokeWidth="1.2"
+          className="stroke-gold/50"
+        />
+        {/* Inner 8-point star */}
+        <path
+          d="M32,14 L34,26 L46,24 L38,32 L46,40 L34,38 L32,50 L30,38 L18,40 L26,32 L18,24 L30,26 Z"
+          fill="none"
+          strokeWidth="0.8"
+          className="stroke-gold/30"
+        />
+        {/* Center circle */}
+        <circle
+          cx="32"
+          cy="32"
+          r="4"
+          fill="none"
+          strokeWidth="0.8"
+          className="stroke-gold/40"
+        />
+        <circle cx="32" cy="32" r="1.5" className="fill-gold/30" />
+        {/* Corner accent lines */}
+        <path
+          d="M4,4 L16,16 M4,4 L4,16 M4,4 L16,4"
+          fill="none"
+          strokeWidth="0.6"
+          className="stroke-gold/25"
+        />
+      </svg>
+    </div>
+  );
+}
+
+/* ================================================================
+   ROSETTE MOTIF — Islamic geometric octagram
+   ================================================================ */
+function RosetteMotif() {
   return (
     <div
       aria-hidden="true"
-      className={`pointer-events-none absolute ${isRTL ? "-left-40 sm:-left-16" : "-right-40 sm:-right-16"} top-1/2 h-[560px] w-[560px] -translate-y-1/2 opacity-0 animate-fade-up [animation-delay:80ms] sm:h-[640px] sm:w-[640px]`}
+      className="pointer-events-none absolute -right-40 top-1/2 h-[560px] w-[560px] -translate-y-1/2 animate-fade-up opacity-0 [animation-delay:80ms] sm:-right-16 sm:h-[640px] sm:w-[640px]"
     >
-      {/* Central glow */}
-      <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 animate-glow-pulse rounded-full bg-gold/30 blur-3xl" />
-
-      {/* Secondary glow */}
-      <div className="absolute left-1/2 top-1/2 h-32 w-32 -translate-x-1/2 -translate-y-1/2 animate-glow-pulse rounded-full bg-verdant/20 blur-2xl [animation-delay:1s]" />
+      {/* Central glow — light within a niche */}
+      <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 animate-glow-pulse rounded-full bg-gold/40 blur-3xl" />
+      <div className="absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 animate-glow-pulse rounded-full bg-parchment/15 blur-2xl [animation-delay:1s]" />
 
       <svg viewBox="0 0 420 420" className="absolute inset-0 h-full w-full">
         {/* Outer circle */}
@@ -215,30 +570,26 @@ function RosetteMotif() {
           r="196"
           fill="none"
           strokeWidth="0.8"
+          className="stroke-gold/[0.12]"
+        />
+        <circle
+          cx="210"
+          cy="210"
+          r="170"
+          fill="none"
+          strokeWidth="0.5"
           className="stroke-gold/[0.08]"
         />
-
-        {/* Middle circle */}
         <circle
           cx="210"
           cy="210"
-          r="160"
+          r="140"
           fill="none"
-          strokeWidth="0.5"
-          className="stroke-gold/[0.05]"
-        />
-
-        {/* Inner circle */}
-        <circle
-          cx="210"
-          cy="210"
-          r="120"
-          fill="none"
-          strokeWidth="0.5"
+          strokeWidth="0.4"
           className="stroke-gold/[0.06]"
         />
 
-        {/* Spinning outer star */}
+        {/* Outer octagram */}
         <g
           className="animate-spin-slow"
           style={{ transformBox: "view-box", transformOrigin: "210px 210px" }}
@@ -247,11 +598,11 @@ function RosetteMotif() {
             d="M210.00,42.00 L236.79,145.33 L328.79,91.21 L274.67,183.21 L378.00,210.00 L274.67,236.79 L328.79,328.79 L236.79,274.67 L210.00,378.00 L183.21,274.67 L91.21,328.79 L145.33,236.79 L42.00,210.00 L145.33,183.21 L91.21,91.21 L183.21,145.33 Z"
             fill="none"
             strokeWidth="1"
-            className="stroke-gold/30"
+            className="stroke-gold/40"
           />
         </g>
 
-        {/* Counter-spinning inner star */}
+        {/* Inner octagram */}
         <g
           className="animate-spin-slow-reverse"
           style={{ transformBox: "view-box", transformOrigin: "210px 210px" }}
@@ -260,22 +611,20 @@ function RosetteMotif() {
             d="M263.58,80.66 L251.01,168.99 L339.34,156.42 L268.00,210.00 L339.34,263.58 L251.01,251.01 L263.58,339.34 L210.00,268.00 L156.42,339.34 L168.99,251.01 L80.66,263.58 L152.00,210.00 L80.66,156.42 L168.99,168.99 L156.42,80.66 L210.00,152.00 Z"
             fill="none"
             strokeWidth="0.8"
-            className="stroke-verdant/40"
+            className="stroke-verdant/45"
           />
         </g>
 
-        {/* Center circle */}
+        {/* Inner circle */}
         <circle
           cx="210"
           cy="210"
           r="34"
           fill="none"
-          strokeWidth="1"
-          className="stroke-gold/40"
+          strokeWidth="0.8"
+          className="stroke-gold/45"
         />
-
-        {/* Center dot */}
-        <circle cx="210" cy="210" r="4" className="fill-gold/60" />
+        <circle cx="210" cy="210" r="3" className="fill-gold/50" />
       </svg>
     </div>
   );
