@@ -9,22 +9,34 @@ const config: Config = {
         ink: {
           DEFAULT: "#0c0a09",
           light: "#1c1917",
+          softer: "#292524",
         },
         parchment: {
           DEFAULT: "#f5f0e8",
           muted: "#a8a29e",
+          soft: "#e7e2da",
         },
         gold: {
           DEFAULT: "#d4af37",
           soft: "#e5c76b",
+          deep: "#b8941f",
+          pale: "rgba(212, 175, 55, 0.15)",
+          glow: "rgba(212, 175, 55, 0.08)",
         },
         verdant: {
           DEFAULT: "#5f8d6e",
+          soft: "#7aad8a",
+          deep: "#4a7056",
+        },
+        azure: {
+          DEFAULT: "#4a7c8c",
+          soft: "#6a9cac",
         },
       },
       fontFamily: {
         display: ["var(--font-display)", "system-ui", "sans-serif"],
         arabic: ["Amiri", "Scheherazade New", "serif"],
+        kufi: ["'Traditional Arabic'", "serif"],
       },
       animation: {
         "fade-up": "fadeUp 0.8s ease-out forwards",
@@ -37,6 +49,9 @@ const config: Config = {
         "float-2": "float2 15s ease-in-out infinite",
         "float-3": "float3 18s ease-in-out infinite",
         "shamsah-pulse": "shamsahPulse 6s ease-in-out infinite",
+        "geometric-rotate": "geometricRotate 30s linear infinite",
+        "lantern-flicker": "lanternFlicker 3s ease-in-out infinite",
+        "crescent-glow": "crescentGlow 5s ease-in-out infinite",
       },
       keyframes: {
         fadeUp: {
@@ -77,6 +92,28 @@ const config: Config = {
           "0%, 100%": { opacity: "0.5", transform: "scale(1)" },
           "50%": { opacity: "1", transform: "scale(1.05)" },
         },
+        geometricRotate: {
+          "0%": { transform: "rotate(0deg)" },
+          "100%": { transform: "rotate(360deg)" },
+        },
+        lanternFlicker: {
+          "0%, 100%": { opacity: "0.6", filter: "brightness(1)" },
+          "50%": { opacity: "0.9", filter: "brightness(1.2)" },
+        },
+        crescentGlow: {
+          "0%, 100%": { boxShadow: "0 0 20px rgba(212, 175, 55, 0.1)" },
+          "50%": { boxShadow: "0 0 40px rgba(212, 175, 55, 0.2)" },
+        },
+      },
+      backgroundImage: {
+        "girih-pattern":
+          "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 0L33 27L60 30L33 33L30 60L27 33L0 30L27 27Z' fill='none' stroke='%23d4af37' stroke-width='0.3' opacity='0.15'/%3E%3C/svg%3E\")",
+        "arabesque-dots":
+          "radial-gradient(circle, rgba(212,175,55,0.1) 1px, transparent 1px)",
+      },
+      backgroundSize: {
+        girih: "60px 60px",
+        dots: "24px 24px",
       },
     },
   },

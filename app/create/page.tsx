@@ -1,7 +1,6 @@
 "use client";
-import { LocaleSwitcher } from "@/components/locale-switcher";
-import { Navbar } from "@/components/navbar";
-import { VideoBuilder } from "@/components/VideoBuilder";
+import { LocaleSwitcher } from "@/components/Home/locale-switcher";
+import { VideoBuilder } from "@/components/VideoBuilder/VideoBuilder";
 import { I18nProvider } from "@/lib/i18n";
 
 export default function CreatePage() {

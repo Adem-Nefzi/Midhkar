@@ -5,8 +5,6 @@
 @tailwind utilities;
 
 :root {
-  /* kept in sync with tailwind.config.ts colors so focus rings,
-     selection, and the scrollbar match the same gold/ink everywhere */
   --ink: 12 10 9;
   --ink-soft: 28 25 23;
   --gold: 212 175 55;
@@ -57,6 +55,360 @@ body {
 
 [dir="rtl"] .font-display {
   letter-spacing: 0;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.3);
+  border-radius: 2px;
+}
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 175, 55, 0.3) transparent;
+}
+
+/* ── Islamic Geometric Border Patterns ─────────────────────────── */
+
+.islamic-border-top,
+.islamic-border-bottom {
+  position: relative;
+}
+.islamic-border-top::before,
+.islamic-border-bottom::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(212, 175, 55, 0.3) 15%, 
+    rgba(212, 175, 55, 0.6) 50%, 
+    rgba(212, 175, 55, 0.3) 85%, 
+    transparent 100%
+  );
+}
+.islamic-border-top::before {
+  top: 0;
+}
+.islamic-border-bottom::after {
+  bottom: 0;
+}
+
+.islamic-corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+.islamic-corner::before,
+.islamic-corner::after {
+  content: '';
+  position: absolute;
+  background: rgba(212, 175, 55, 0.4);
+}
+.islamic-corner-tl { top: 0; left: 0; }
+.islamic-corner-tl::before { top: 0; left: 0; width: 24px; height: 2px; }
+.islamic-corner-tl::after { top: 0; left: 0; width: 2px; height: 24px; }
+.islamic-corner-tr { top: 0; right: 0; }
+.islamic-corner-tr::before { top: 0; right: 0; width: 24px; height: 2px; }
+.islamic-corner-tr::after { top: 0; right: 0; width: 2px; height: 24px; }
+.islamic-corner-bl { bottom: 0; left: 0; }
+.islamic-corner-bl::before { bottom: 0; left: 0; width: 24px; height: 2px; }
+.islamic-corner-bl::after { bottom: 0; left: 0; width: 2px; height: 24px; }
+.islamic-corner-br { bottom: 0; right: 0; }
+.islamic-corner-br::before { bottom: 0; right: 0; width: 24px; height: 2px; }
+.islamic-corner-br::after { bottom: 0; right: 0; width: 2px; height: 24px; }
+
+/* ── Kufic Decorative Frame ──────────────────────────────────── */
+
+.kufic-frame {
+  position: relative;
+  border: 1px solid rgba(212, 175, 55, 0.15);
+}
+.kufic-frame::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 1px solid rgba(212, 175, 55, 0.1);
+  pointer-events: none;
+}
+
+/* ── Bismillah Calligraphic Accent ───────────────────────────── */
+
+.bismillah-accent {
+  position: relative;
+  display: inline-block;
+}
+.bismillah-accent::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.5), transparent);
+}
+
+/* ── Surah Card Islamic Motif ────────────────────────────────── */
+
+.surah-card-motif {
+  position: relative;
+  overflow: hidden;
+}
+.surah-card-motif::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 70% 30%, rgba(212, 175, 55, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* ── Verse Number Islamic Badge ──────────────────────────────── */
+
+.ayah-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ayah-badge::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 50%;
+  transform: rotate(45deg);
+}
+
+/* ── Step Indicator Islamic Connector ─────────────────────────── */
+
+.step-connector {
+  position: relative;
+}
+.step-connector::before {
+  content: '۞';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(212, 175, 55, 0.3);
+  font-size: 8px;
+}
+
+/* ── Animated Background Keyframes ───────────────────────────── */
+
+@keyframes goldenPulse {
+  0%, 100% { background-position: 0% 50%; opacity: 0.7; }
+  25% { background-position: 50% 0%; opacity: 0.9; }
+  50% { background-position: 100% 50%; opacity: 0.7; }
+  75% { background-position: 50% 100%; opacity: 0.9; }
+}
+.bg-anim-golden-pulse {
+  background: linear-gradient(135deg, #1a1200, #2a2210, #0c0a09, #1a2e20, #1a1200);
+  background-size: 400% 400%;
+  animation: goldenPulse 8s ease-in-out infinite;
+}
+
+@keyframes starFloat {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
+  50% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+}
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.bg-anim-starry-night {
+  background: radial-gradient(ellipse at 20% 50%, #1a1200, #0c0a09 70%);
+  position: relative;
+  overflow: hidden;
+}
+.bg-anim-starry-night::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(2px 2px at 15% 20%, #fff 50%, transparent),
+    radial-gradient(2px 2px at 35% 45%, #f5f0e8 50%, transparent),
+    radial-gradient(1px 1px at 55% 15%, #fff 50%, transparent),
+    radial-gradient(2px 2px at 75% 60%, #f5f0e8 50%, transparent),
+    radial-gradient(1px 1px at 90% 25%, #fff 50%, transparent),
+    radial-gradient(2px 2px at 10% 75%, #f5f0e8 50%, transparent),
+    radial-gradient(1px 1px at 45% 80%, #fff 50%, transparent),
+    radial-gradient(2px 2px at 65% 35%, #f5f0e8 50%, transparent),
+    radial-gradient(1px 1px at 80% 85%, #fff 50%, transparent),
+    radial-gradient(2px 2px at 25% 55%, #f5f0e8 50%, transparent),
+    radial-gradient(1px 1px at 50% 40%, #d4af37 50%, transparent);
+  animation: starTwinkle 4s ease-in-out infinite alternate;
+}
+
+@keyframes rippleExpand {
+  0% { transform: scale(0.5); opacity: 0.4; }
+  100% { transform: scale(3); opacity: 0; }
+}
+.bg-anim-ripple {
+  background: radial-gradient(ellipse at center, #0a1a12, #0c0a09);
+  position: relative;
+  overflow: hidden;
+}
+.bg-anim-ripple::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(circle at 30% 40%, rgba(212, 175, 55, 0.06) 0%, transparent 40%),
+              radial-gradient(circle at 70% 60%, rgba(95, 141, 110, 0.05) 0%, transparent 35%),
+              radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.04) 0%, transparent 50%);
+  animation: rippleExpand 6s ease-out infinite;
+}
+
+@keyframes shimmerSweep {
+  0% { transform: translateX(-100%) rotate(25deg); }
+  100% { transform: translateX(200%) rotate(25deg); }
+}
+.bg-anim-shimmer {
+  background: linear-gradient(135deg, #0c0a09, #1a1200, #0c0a09);
+  position: relative;
+  overflow: hidden;
+}
+.bg-anim-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(212, 175, 55, 0.06) 30%, rgba(212, 175, 55, 0.1) 50%, rgba(212, 175, 55, 0.06) 70%, transparent 100%);
+  animation: shimmerSweep 4s ease-in-out infinite;
+}
+
+@keyframes mistDrift {
+  0% { transform: translateX(-20%) translateY(0); opacity: 0.3; }
+  50% { transform: translateX(10%) translateY(-10px); opacity: 0.5; }
+  100% { transform: translateX(30%) translateY(0); opacity: 0.3; }
+}
+.bg-anim-mist {
+  background: radial-gradient(ellipse at center, #0a0d0c, #0c0a09);
+  position: relative;
+  overflow: hidden;
+}
+.bg-anim-mist::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 60% 40% at 30% 50%, rgba(212, 175, 55, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 30% at 70% 60%, rgba(245, 240, 232, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 50% at 50% 40%, rgba(95, 141, 110, 0.04) 0%, transparent 60%);
+  animation: mistDrift 12s ease-in-out infinite;
+}
+
+/* ── Islamic Arch Shape ──────────────────────────────────────── */
+
+.islamic-arch {
+  border-radius: 50% 50% 0 0 / 20% 20% 0 0;
+}
+
+/* ── Geometric Rosette Decoration ────────────────────────────── */
+
+.rosette-decoration {
+  position: relative;
+}
+.rosette-decoration::before {
+  content: '❋';
+  position: absolute;
+  color: rgba(212, 175, 55, 0.15);
+  font-size: 120px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* ── Mamluk-Style Border ───────────────────────────────────── */
+
+.mamluk-border {
+  border: 2px solid transparent;
+  border-image: linear-gradient(135deg, 
+    rgba(212, 175, 55, 0.4) 0%, 
+    rgba(212, 175, 55, 0.1) 25%, 
+    rgba(212, 175, 55, 0.4) 50%, 
+    rgba(212, 175, 55, 0.1) 75%, 
+    rgba(212, 175, 55, 0.4) 100%
+  ) 1;
+}
+
+/* ── Lantern Glow Effect ─────────────────────────────────────── */
+
+.lantern-glow {
+  position: relative;
+}
+.lantern-glow::after {
+  content: '';
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 40%;
+  background: radial-gradient(ellipse at center, rgba(212, 175, 55, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Crescent Moon Accent ────────────────────────────────────── */
+
+.crescent-accent {
+  position: relative;
+}
+.crescent-accent::before {
+  content: '';
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  box-shadow: -8px 0 0 0 rgba(212, 175, 55, 0.2);
+  transform: rotate(-30deg);
+  pointer-events: none;
+}
+
+/* ── Mashrabiya Pattern Overlay ────────────────────────────── */
+
+.mashrabiya-overlay {
+  position: relative;
+}
+.mashrabiya-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(90deg, rgba(212, 175, 55, 0.02) 1px, transparent 1px),
+    linear-gradient(rgba(212, 175, 55, 0.02) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+
+/* ── Dome Shape Decoration ─────────────────────────────────── */
+
+.dome-shape {
+  position: relative;
+}
+.dome-shape::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 60px;
+  background: radial-gradient(ellipse at 50% 100%, rgba(212, 175, 55, 0.06) 0%, transparent 70%);
+  border-radius: 50% 50% 0 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -22,7 +22,7 @@ export function Features() {
     return () => observer.disconnect();
   }, []);
 
-  const items = t("features.items") as { title: string; description: string }[];
+  const items = t("features.items") as unknown as { title: string; description: string }[];
 
   const icons = [
     <svg
