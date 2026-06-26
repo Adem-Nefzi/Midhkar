@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { SignedIn, SignedOut, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { useI18n } from "@/lib/i18n";
 import { useEffect, useRef, useState, useCallback } from "react";
 
@@ -409,29 +408,13 @@ export function Hero() {
 
         {/* CTA Buttons */}
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4 animate-fade-up opacity-0 [animation-delay:460ms]">
-          <SignedOut>
-            <SignUpButton mode="modal">
-              <button className="group relative cursor-pointer overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20">
-                <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-                <span className="relative">{t("hero.ctaPrimary")}</span>
-              </button>
-            </SignUpButton>
-            <SignInButton mode="modal">
-              <button className="cursor-pointer rounded-full border-2 border-parchment/20 px-8 py-3.5 text-sm text-parchment transition hover:border-gold/50 hover:text-gold hover:bg-gold/5">
-                {t("hero.ctaSecondary")}
-              </button>
-            </SignInButton>
-          </SignedOut>
-
-          <SignedIn>
-            <Link
-              href="/create"
-              className="group relative inline-block overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20"
-            >
-              <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-              <span className="relative">{t("hero.ctaPrimary")}</span>
-            </Link>
-          </SignedIn>
+          <Link
+            href="/create"
+            className="group relative inline-block overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20"
+          >
+            <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
+            <span className="relative">{t("hero.ctaPrimary")}</span>
+          </Link>
         </div>
       </div>
     </section>

@@ -61,13 +61,9 @@ export const PLATFORMS = [
 ];
 
 export const TEXT_POSITIONS = [
-  { id: "center", label: "Center" },
   { id: "top", label: "Top" },
-  { id: "top-left", label: "Top Left" },
-  { id: "top-right", label: "Top Right" },
+  { id: "center", label: "Center" },
   { id: "bottom", label: "Bottom" },
-  { id: "bottom-left", label: "Bottom Left" },
-  { id: "bottom-right", label: "Bottom Right" },
 ];
 
 export const TEXT_COLORS = [
@@ -84,11 +80,6 @@ export const TEXT_COLORS = [
 ];
 
 export const ANIMATED_BG = [
-  { id: "golden-pulse", label: "Golden Pulse", icon: "✦" },
-  { id: "starry-night", label: "Starry Night", icon: "★" },
-  { id: "ripple", label: "Rippling Water", icon: "〰" },
-  { id: "shimmer", label: "Shimmer", icon: "✨" },
-  { id: "mist", label: "Mist", icon: "🌫" },
   { id: "upload", label: "Upload Video", icon: "📁" },
 ];
 

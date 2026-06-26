@@ -19,9 +19,9 @@ import {
   getEveryayahAudioUrl,
   PLATFORMS,
 } from "@/lib/quran";
-import { fetchImageKitVideos } from "@/lib/imagekit-client";
+import { fetchStorageVideos } from "@/lib/storage-client";
 import type { Surah, Ayah, Reciter } from "@/lib/quran";
-import type { ImageKitFile } from "@/lib/imagekit-client";
+import type { StorageVideo } from "@/lib/storage-client";
 import { DEFAULT_SETTINGS, GenLog, VideoSettings } from "@/lib/types";
 import { generateVideo } from "@/lib/generate-video";
 import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
@@ -94,10 +94,9 @@ export function VideoBuilder() {
   const [selectedNums,    setSelectedNums]    = useState<Set<number>>(new Set());
   const [selectedReciter, setSelectedReciter] = useState<Reciter | null>(null);
 
-  /* ── ImageKit ──────────────────────────────────────────────── */
-  const [ikVideos,   setIkVideos]   = useState<ImageKitFile[]>([]);
-  const [ikLoading,  setIkLoading]  = useState(false);
-  const [ikCategory, setIkCategory] = useState("nature");
+  /* ── Storage Videos ──────────────────────────────────────── */
+  const [videos, setVideos]               = useState<StorageVideo[]>([]);
+  const [videosLoading, setVideosLoading] = useState(false);
 
   /* ── Settings ──────────────────────────────────────────────── */
   const [settings, setSettings] = useState<VideoSettings>({
@@ -158,9 +157,9 @@ export function VideoBuilder() {
   }, [selectedSurah, settings.translationLang]);
 
   useEffect(() => {
-    setIkLoading(true);
-    fetchImageKitVideos(ikCategory).then(setIkVideos).catch(() => setIkVideos([])).finally(() => setIkLoading(false));
-  }, [ikCategory]);
+    setVideosLoading(true);
+    fetchStorageVideos().then(setVideos).catch(() => setVideos([])).finally(() => setVideosLoading(false));
+  }, []);
   /* ── Handlers ───────────────────────────────────────────────── */
   const stopAudio = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
@@ -264,7 +263,7 @@ export function VideoBuilder() {
     const bgEl = bgVideoRef.current;
     if (bgEl) {
       const src =
-        settings.background === "imagekit" ? settings.imageKitUrl
+        settings.background === "library" ? settings.videoUrl
         : settings.background === "upload"  ? settings.uploadedVideoUrl
         : null;
       if (src) {
@@ -380,6 +379,9 @@ export function VideoBuilder() {
             onBack={() => setStep(1)}
             onNext={() => setStep(3)}
             locale={locale}
+            surahNumber={selectedSurah.number}
+            reciterIdentifier={selectedReciter?.identifier ?? null}
+            reciters={reciters}
           />
         )}
 
@@ -397,10 +399,8 @@ export function VideoBuilder() {
             audioError={audioError}
             onToggleAudio={handleToggleAudio}
             canPreviewAudio={!!(selectedReciter && selectedSurah && sortedNums.length > 0)}
-            ikVideos={ikVideos}
-            ikLoading={ikLoading}
-            ikCategory={ikCategory}
-            onIkCategory={setIkCategory}
+            storageVideos={videos}
+            videosLoading={videosLoading}
             onFileUpload={handleFileUpload}
             uploadError={null}
             onBack={() => setStep(2)}

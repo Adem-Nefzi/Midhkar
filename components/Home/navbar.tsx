@@ -1,13 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
 import { useI18n } from "@/lib/i18n";
 
 const locales: { code: "en" | "fr" | "ar"; label: string }[] = [
@@ -107,32 +100,13 @@ export function Navbar() {
 
           <div className="h-6 w-px bg-gold/15" />
 
-          <SignedOut>
-            <SignInButton mode="modal">
-              <button className="cursor-pointer rounded-full px-4 py-2 text-sm text-parchment-muted transition hover:text-parchment">
-                {t("nav.signIn") as string}
-              </button>
-            </SignInButton>
-            <SignUpButton mode="modal">
-              <button className="group relative cursor-pointer overflow-hidden rounded-full border-2 border-gold/40 bg-gold/15 px-5 py-2 text-sm font-semibold text-gold transition-all hover:bg-gold/25 hover:border-gold/60 hover:shadow-lg hover:shadow-gold/10">
-                <span className="absolute inset-0 -translate-x-full bg-parchment/20 transition-transform duration-500 group-hover:translate-x-full" />
-                <span className="relative">
-                  {t("nav.getStarted") as string}
-                </span>
-              </button>
-            </SignUpButton>
-          </SignedOut>
-
-          <SignedIn>
-            <Link
-              href="/create"
-              className="group relative hidden sm:inline-flex cursor-pointer items-center overflow-hidden rounded-full border-2 border-gold/40 bg-gold/15 px-5 py-2 text-sm font-semibold text-gold transition-all hover:bg-gold/25 hover:border-gold/60 hover:shadow-lg hover:shadow-gold/10"
-            >
-              <span className="absolute inset-0 -translate-x-full bg-parchment/20 transition-transform duration-500 group-hover:translate-x-full" />
-              <span className="relative">{t("nav.create") as string}</span>
-            </Link>
-            <UserButton afterSignOutUrl="/" />
-          </SignedIn>
+          <Link
+            href="/create"
+            className="group relative cursor-pointer overflow-hidden rounded-full border-2 border-gold/40 bg-gold/15 px-5 py-2 text-sm font-semibold text-gold transition-all hover:bg-gold/25 hover:border-gold/60 hover:shadow-lg hover:shadow-gold/10"
+          >
+            <span className="absolute inset-0 -translate-x-full bg-parchment/20 transition-transform duration-500 group-hover:translate-x-full" />
+            <span className="relative">{t("nav.create") as string}</span>
+          </Link>
         </div>
       </div>
     </header>

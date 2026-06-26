@@ -23,7 +23,7 @@ interface Props {
   sortedNums: number[]; // sorted selected verse numbers
   settings: VideoSettings;
   platform: (typeof PLATFORMS)[0];
-  bgVideoRef: React.RefObject<HTMLVideoElement>;
+  bgVideoRef: React.RefObject<HTMLVideoElement | null>;
   // Preview nav
   previewIdx: number;
   onPreviewIdx: (i: number) => void;
@@ -92,7 +92,7 @@ export function StepGenerate({
         bgVideoRef.current,
         settings.bgOverlay,
       );
-      drawAyahFrame(ctx, canvas, ayah, surah, settings, platform, false);
+      drawAyahFrame(ctx, canvas, ayah, surah, settings, platform);
       animRef.current = requestAnimationFrame(draw);
     };
     draw();
@@ -105,7 +105,7 @@ export function StepGenerate({
 
   const lastLog = genLogs[genLogs.length - 1];
   const progress = lastLog?.pct ?? 0;
-  const estDur = (settings.showBasmalah ? 3 : 0) + sortedNums.length * 6;
+  const estDur = sortedNums.length * 6;
   const fileName = `${surah.englishName}_${sortedNums[0]}-${sortedNums[sortedNums.length - 1]}.mp4`;
 
   return (

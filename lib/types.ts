@@ -15,15 +15,17 @@ export interface VideoSettings {
   translationFontFamily: string;
   translationColor: string;
   translationOpacity: number;
-  showBasmalah: boolean;
   showSurahName: boolean;
   showVerseNumber: boolean;
   uploadedVideoUrl: string | null;
-  imageKitUrl: string | null;
-  imageKitThumb: string | null;
+  videoUrl: string | null;
+  videoThumb: string | null;
   textShadow: boolean;
   bgOverlay: number; // 0–80 %
   fontSize: "small" | "medium" | "large";
+  overlayStyle: "none" | "linear" | "radial";
+  showWatermark: boolean;
+  watermarkText: string;
 }
 
 export interface GenLog {
@@ -32,7 +34,7 @@ export interface GenLog {
 }
 
 export const DEFAULT_SETTINGS: VideoSettings = {
-  background: "golden-pulse",
+  background: "library",
   platform: "reels",
   showTranslation: true,
   translationLang: "en",
@@ -43,15 +45,17 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   translationFontFamily: "'Amiri', 'Scheherazade New', serif",
   translationColor: "#f5f0e8",
   translationOpacity: 80,
-  showBasmalah: true,
   showSurahName: true,
   showVerseNumber: true,
   uploadedVideoUrl: null,
-  imageKitUrl: null,
-  imageKitThumb: null,
+  videoUrl: null,
+  videoThumb: null,
   textShadow: true,
   bgOverlay: 35,
   fontSize: "medium",
+  overlayStyle: "linear",
+  showWatermark: false,
+  watermarkText: "",
 };
 
 export const FONTS = [

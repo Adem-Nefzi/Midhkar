@@ -3,15 +3,18 @@
  * StepVerses.tsx  —  Step 2: select ayahs
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   IslamicDivider,
   CrescentMoonIcon,
   GeometricRosette,
   IslamicStarIcon,
+  SearchIcon,
+  Spinner,
+  CheckIcon,
 } from "./icons";
 import { VERSE_PRESETS } from "@/lib/quran";
-import type { Surah, Ayah } from "@/lib/quran";
+import type { Surah, Ayah, Reciter } from "@/lib/quran";
 
 interface Props {
   surah: Surah;
@@ -24,6 +27,9 @@ interface Props {
   onBack: () => void;
   onNext: () => void;
   locale: string;
+  surahNumber: number;
+  reciterIdentifier: string | null;
+  reciters: Reciter[];
 }
 
 export function StepVerses({
@@ -37,8 +43,29 @@ export function StepVerses({
   onBack,
   onNext,
   locale,
+  surahNumber,
+  reciterIdentifier,
+  reciters,
 }: Props) {
   const [query, setQuery] = useState("");
+  const [hoveredAyah, setHoveredAyah] = useState<number | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (hoveredAyah === null || !reciterIdentifier) {
+      if (previewAudioRef.current) { previewAudioRef.current.pause(); previewAudioRef.current = null; }
+      return;
+    }
+    const reciter = reciters.find(r => r.identifier === reciterIdentifier);
+    if (!reciter?.quranApiNo) return;
+    const url = `https://the-quran-project.github.io/Quran-Audio/Data/${reciter.quranApiNo}/${surahNumber}_${hoveredAyah}.mp3`;
+    const audio = new Audio(url);
+    audio.volume = 0.3;
+    previewAudioRef.current = audio;
+    audio.play().catch(() => {});
+    const timer = setTimeout(() => { audio.pause(); }, 3000);
+    return () => { clearTimeout(timer); audio.pause(); };
+  }, [hoveredAyah, reciterIdentifier, surahNumber, reciters]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return ayahs;
@@ -63,17 +90,21 @@ export function StepVerses({
         <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
           {locale === "ar" ? "اختر الآيات" : "Select Verses"}
         </h2>
-        <div className="mt-2 flex items-center justify-center gap-2 text-parchment-muted">
+        <div className="mt-2 flex items-center justify-center gap-2 text-sm text-parchment-muted">
           <CrescentMoonIcon className="h-3 w-3 text-gold/30" />
+          <span className="font-medium" style={{ fontFamily: "'Amiri', serif" }}>
+            {surah.name}
+          </span>
+          <span className="text-parchment-muted/30">—</span>
           <span>
-            {surah.name} — {surah.numberOfAyahs}{" "}
+            {surah.numberOfAyahs}{" "}
             {locale === "ar" ? "آية" : "verses"}
           </span>
         </div>
       </div>
 
       {/* Presets */}
-      <div className="flex flex-wrap items-center gap-2 mb-4 justify-center">
+      <div className="flex flex-wrap items-center gap-2 mb-5 justify-center">
         {VERSE_PRESETS.map((preset) => {
           const count =
             preset.id === "full"
@@ -88,10 +119,10 @@ export function StepVerses({
             <button
               key={preset.id}
               onClick={() => onPreset(preset.id)}
-              className={`rounded-full border px-4 py-1.5 text-xs transition ${
+              className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-all duration-200 hover:-translate-y-px ${
                 active
-                  ? "border-gold/40 bg-gold/15 text-gold ring-1 ring-gold/30"
-                  : "border-gold/20 bg-ink-light/30 text-parchment-muted hover:border-gold/40 hover:text-gold"
+                  ? "border-gold/50 bg-gold/15 text-gold shadow-sm shadow-gold/10 ring-1 ring-gold/20"
+                  : "border-gold/15 bg-ink-light/30 text-parchment-muted hover:border-gold/30 hover:text-gold hover:bg-ink-light/50"
               }`}
             >
               {preset.id === "full"
@@ -105,7 +136,7 @@ export function StepVerses({
         {selected.size > 0 && (
           <button
             onClick={() => onPreset("clear")}
-            className="rounded-full border border-red-900/40 bg-red-900/10 px-4 py-1.5 text-xs text-red-400 hover:bg-red-900/20"
+            className="rounded-full border border-red-500/20 bg-red-500/5 px-4 py-1.5 text-xs text-red-400/80 hover:bg-red-500/10 hover:border-red-500/30 transition-all"
           >
             {locale === "ar" ? "إلغاء" : "Clear"}
           </button>
@@ -114,14 +145,16 @@ export function StepVerses({
 
       {/* Selection badge */}
       {selected.size > 0 && (
-        <div className="text-center mb-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-gold/20 bg-gold/5 px-4 py-1.5 text-sm text-gold/80">
-            <GeometricRosette className="h-4 w-4" />
-            {selected.size} {locale === "ar" ? "آية مختارة" : "verses selected"}
+        <div className="text-center mb-5 animate-fade-up">
+          <span className="inline-flex items-center gap-2.5 rounded-full border border-gold/25 bg-gold/[0.06] px-5 py-2 text-sm text-gold/90 shadow-sm shadow-gold/5">
+            <GeometricRosette className="h-4 w-4 text-gold/60" />
+            <span className="font-medium">{selected.size}</span>
+            <span className="text-parchment-muted/60">
+              {locale === "ar" ? "آية مختارة" : "verses selected"}
+            </span>
             {sortedSelected.length > 1 && (
-              <span className="text-parchment-muted/60 text-xs">
-                ({sortedSelected[0]}–{sortedSelected[sortedSelected.length - 1]}
-                )
+              <span className="text-parchment-muted/40 text-xs">
+                ({sortedSelected[0]}–{sortedSelected[sortedSelected.length - 1]})
               </span>
             )}
           </span>
@@ -129,34 +162,29 @@ export function StepVerses({
       )}
 
       {/* Search */}
-      <div className="relative max-w-md mx-auto mb-4">
+      <div className="relative max-w-md mx-auto mb-5 group">
+        <SearchIcon
+          className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/30 group-focus-within:text-gold/60 transition-colors"
+        />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={locale === "ar" ? "ابحث في الآيات…" : "Search verses…"}
-          className="w-full rounded-full border border-gold/20 bg-ink-light/50 px-5 py-2 pl-10 text-sm text-parchment placeholder-parchment-muted/50 outline-none focus:border-gold/40"
+          placeholder={locale === "ar" ? "ابحث في الآيات..." : "Search verses..."}
+          className="w-full rounded-sm border border-gold/20 bg-ink-light/40 px-5 py-2.5 pl-10 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 focus:bg-ink-light/60 transition-all"
         />
-        <svg
-          className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gold/40"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
       </div>
 
       {/* Verse list */}
-      <div className="rounded-sm border border-gold/15 bg-ink-light/20 overflow-hidden">
+      <div className="rounded-sm border border-gold/15 bg-ink-light/15 overflow-hidden shadow-lg shadow-black/10">
         {loading ? (
-          <div className="flex justify-center py-8">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-gold/30 border-t-gold" />
+          <div className="flex justify-center py-12">
+            <div className="flex flex-col items-center gap-3">
+              <Spinner className="h-6 w-6 text-gold" />
+              <span className="text-xs text-parchment-muted/40">
+                {locale === "ar" ? "جاري تحميل الآيات..." : "Loading verses..."}
+              </span>
+            </div>
           </div>
         ) : (
           <div className="max-h-[520px] overflow-y-auto custom-scrollbar">
@@ -172,53 +200,51 @@ export function StepVerses({
                     if (e.key === "Enter" || e.key === " ")
                       onToggle(ayah.numberInSurah);
                   }}
-                  className={`border-b border-gold/5 px-4 py-3.5 cursor-pointer transition ${
+                  onMouseEnter={() => setHoveredAyah(ayah.numberInSurah)}
+                  onMouseLeave={() => setHoveredAyah(null)}
+                  className={`border-b border-gold/[0.04] px-5 py-4 cursor-pointer transition-all duration-200 ${
                     sel
-                      ? "bg-gold/[0.06] border-l-2 border-l-gold"
-                      : "hover:bg-ink-light/40 border-l-2 border-l-transparent"
+                      ? "bg-gold/[0.06] border-l-[3px] border-l-gold/60"
+                      : "hover:bg-ink-light/30 border-l-[3px] border-l-transparent hover:border-l-gold/15"
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <span
-                      className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-medium transition ${
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold transition-all duration-200 ${
                         sel
-                          ? "bg-gold/25 text-gold ring-1 ring-gold/40"
-                          : "bg-parchment/8 text-parchment-muted"
+                          ? "bg-gold/20 text-gold ring-1 ring-gold/30 shadow-sm shadow-gold/10"
+                          : "bg-parchment/[0.06] text-parchment-muted/50"
                       }`}
                     >
                       {ayah.numberInSurah}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p
-                        className="text-sm text-parchment leading-relaxed"
+                        className={`text-sm leading-[1.8] transition-colors duration-200 ${
+                          sel ? "text-parchment" : "text-parchment/80"
+                        }`}
                         style={{ fontFamily: "'Amiri', serif" }}
                         dir="rtl"
                       >
                         {ayah.text}
                       </p>
                       {showTranslation && ayah.translation && (
-                        <p className="mt-1 text-xs text-parchment-muted/60 leading-relaxed">
+                        <p className={`mt-1.5 text-xs leading-relaxed transition-colors duration-200 ${
+                          sel ? "text-parchment-muted/70" : "text-parchment-muted/40"
+                        }`}>
                           {ayah.translation}
                         </p>
                       )}
                     </div>
                     <div
-                      className={`shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition mt-1 ${sel ? "border-gold bg-gold/20" : "border-gold/20"}`}
+                      className={`shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all duration-200 mt-1 ${
+                        sel
+                          ? "border-gold/60 bg-gold/20 shadow-sm shadow-gold/10"
+                          : "border-gold/15 hover:border-gold/30"
+                      }`}
                     >
                       {sel && (
-                        <svg
-                          className="h-3 w-3 text-gold"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
+                        <CheckIcon className="h-3.5 w-3.5 text-gold" />
                       )}
                     </div>
                   </div>
@@ -230,10 +256,10 @@ export function StepVerses({
       </div>
 
       {/* Nav */}
-      <div className="mt-8 flex justify-center gap-4">
+      <div className="mt-10 flex justify-center gap-4">
         <button
           onClick={onBack}
-          className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 transition"
+          className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 transition-all duration-200"
         >
           <IslamicStarIcon className="h-3 w-3 rotate-180" />
           {locale === "ar" ? "رجوع" : "Back"}
@@ -241,10 +267,13 @@ export function StepVerses({
         <button
           onClick={onNext}
           disabled={selected.size === 0}
-          className="rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+          className="group relative overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none transition-all duration-200 flex items-center gap-2"
         >
-          {locale === "ar" ? "التالي" : "Next"}{" "}
-          <IslamicStarIcon className="h-4 w-4" />
+          <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
+          <span className="relative flex items-center gap-2">
+            {locale === "ar" ? "التالي" : "Next"}
+            <IslamicStarIcon className="h-4 w-4 transition-transform group-hover:rotate-45" />
+          </span>
         </button>
       </div>
     </div>

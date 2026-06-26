@@ -3,8 +3,7 @@
  * StepSettings.tsx  —  Step 3: reciter + video settings
  */
 
-import { useRef } from "react";
-import { SignedIn, SignedOut, SignInButton } from "@clerk/nextjs";
+import { useRef, useState, useEffect, useCallback } from "react";
 import {
   GeometricRosette,
   CrescentMoonIcon,
@@ -21,9 +20,8 @@ import {
   TEXT_COLORS,
   ANIMATED_BG,
 } from "@/lib/quran";
-import { IMAGEKIT_CATEGORIES } from "@/lib/imagekit-client";
 import type { Reciter } from "@/lib/quran";
-import type { ImageKitFile } from "@/lib/imagekit-client";
+import type { StorageVideo } from "@/lib/storage-client";
 import { FONTS, VideoSettings } from "@/lib/types";
 
 interface Props {
@@ -40,11 +38,9 @@ interface Props {
   audioError: string | null;
   onToggleAudio: () => void;
   canPreviewAudio: boolean;
-  // ImageKit
-  ikVideos: ImageKitFile[];
-  ikLoading: boolean;
-  ikCategory: string;
-  onIkCategory: (cat: string) => void;
+  // Storage videos
+  storageVideos: StorageVideo[];
+  videosLoading: boolean;
   // Upload
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   uploadError: string | null;
@@ -67,10 +63,8 @@ export function StepSettings({
   audioError,
   onToggleAudio,
   canPreviewAudio,
-  ikVideos,
-  ikLoading,
-  ikCategory,
-  onIkCategory,
+  storageVideos,
+  videosLoading,
   onFileUpload,
   uploadError,
   onBack,
@@ -224,7 +218,7 @@ export function StepSettings({
           <Field label={locale === "ar" ? "الخلفية" : "Background"}>
             <div className="grid grid-cols-3 gap-2">
               {ANIMATED_BG.filter(
-                (b) => b.id !== "upload" && b.id !== "imagekit",
+                (b) => b.id !== "upload" && b.id !== "library",
               ).map((bg) => (
                 <ToggleBtn
                   key={bg.id}
@@ -259,64 +253,80 @@ export function StepSettings({
             )}
           </Field>
 
-          {/* ImageKit library */}
+          {/* Video library */}
           <Field label={locale === "ar" ? "مكتبة الخلفيات" : "Video Library"}>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {IMAGEKIT_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => {
-                    onIkCategory(cat.id);
-                    onChange("background", "imagekit");
-                  }}
-                  className={`rounded-full border px-3 py-1 text-[11px] transition ${
-                    ikCategory === cat.id
-                      ? "border-gold/40 bg-gold/15 text-gold"
-                      : "border-gold/10 text-parchment-muted hover:border-gold/25"
-                  }`}
-                >
-                  {cat.icon} {cat.label}
-                </button>
-              ))}
-            </div>
-            {ikLoading ? (
-              <div className="flex justify-center py-3">
-                <Spinner className="h-4 w-4" />
+            {videosLoading ? (
+              <div className="flex justify-center py-6">
+                <Spinner className="h-5 w-5 text-gold" />
               </div>
+            ) : storageVideos.length === 0 ? (
+              <p className="text-xs text-parchment-muted/40 py-4 text-center">
+                {locale === "ar" ? "لا توجد فيديوهات" : "No videos found in storage"}
+              </p>
             ) : (
-              <div className="grid grid-cols-3 gap-1.5">
-                {ikVideos.slice(0, 6).map((v) => (
-                  <button
-                    key={v.fileId}
-                    onClick={() => {
-                      onChange("background", "imagekit");
-                      onChange("imageKitUrl", v.url);
-                      onChange("imageKitThumb", v.thumbnail);
-                    }}
-                    className={`relative rounded-sm overflow-hidden border transition-all aspect-video bg-ink-light ${
-                      settings.imageKitUrl === v.url
-                        ? "border-gold ring-1 ring-gold/40"
-                        : "border-gold/10 hover:border-gold/30"
-                    }`}
-                  >
-                    {v.thumbnail && (
-                      <img
-                        src={v.thumbnail}
-                        alt=""
+              <div className="max-h-[320px] overflow-y-auto custom-scrollbar pr-1">
+                <div className="grid grid-cols-3 gap-2">
+                  {storageVideos.map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => {
+                        onChange("background", "library");
+                        onChange("videoUrl", v.url);
+                        onChange("videoThumb", "");
+                      }}
+                      className={`relative rounded-sm overflow-hidden border-2 transition-all duration-200 aspect-video bg-ink-light group ${
+                        settings.videoUrl === v.url
+                          ? "border-gold ring-2 ring-gold/40 shadow-lg shadow-gold/10"
+                          : "border-gold/10 hover:border-gold/30 hover:ring-1 hover:ring-gold/20"
+                      }`}
+                    >
+                      <video
+                        src={v.url}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        crossOrigin="anonymous"
                         className="w-full h-full object-cover"
-                        loading="lazy"
+                        onLoadedData={(e) => { e.currentTarget.currentTime = 1; }}
+                        onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                        onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 1; }}
                       />
-                    )}
-                    {settings.imageKitUrl === v.url && (
-                      <div className="absolute inset-0 bg-gold/15 flex items-center justify-center">
-                        <CheckIcon className="h-4 w-4 text-gold" />
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+                        <div className="h-8 w-8 rounded-full bg-gold/30 backdrop-blur-sm flex items-center justify-center">
+                          <PlayIcon className="h-4 w-4 text-parchment" />
+                        </div>
                       </div>
-                    )}
-                  </button>
-                ))}
+                      {settings.videoUrl === v.url && (
+                        <div className="absolute inset-0 bg-gold/20 flex items-center justify-center">
+                          <div className="h-7 w-7 rounded-full bg-gold flex items-center justify-center shadow-lg">
+                            <CheckIcon className="h-4 w-4 text-ink" />
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </Field>
+
+          {/* Selected video preview */}
+          {settings.videoUrl && (
+            <div className="rounded-sm border border-gold/25 bg-ink/50 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-gold/10">
+                <span className="text-[10px] text-gold/50 font-medium">
+                  {locale === "ar" ? "معاينة" : "Preview"}
+                </span>
+                <button
+                  onClick={() => { onChange("videoUrl", null); onChange("videoThumb", null); }}
+                  className="text-[10px] text-parchment-muted/40 hover:text-red-400 transition-colors"
+                >
+                  {locale === "ar" ? "إزالة" : "Remove"}
+                </button>
+              </div>
+              <VideoPreviewPlayer url={settings.videoUrl} />
+            </div>
+          )}
 
           {/* Darkness overlay */}
           <Field
@@ -362,10 +372,6 @@ export function StepSettings({
             {
               key: "showTranslation" as const,
               label: locale === "ar" ? "إظهار الترجمة" : "Show Translation",
-            },
-            {
-              key: "showBasmalah" as const,
-              label: locale === "ar" ? "بسملة في البداية" : "Bismillah Intro",
             },
             {
               key: "showSurahName" as const,
@@ -556,36 +562,17 @@ export function StepSettings({
           <IslamicStarIcon className="h-3 w-3 rotate-180" />{" "}
           {locale === "ar" ? "رجوع" : "Back"}
         </button>
-        <SignedIn>
-          <button
-            onClick={onNext}
-            disabled={!selectedReciter}
-            className="rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-          >
+        <button
+          onClick={onNext}
+          disabled={!selectedReciter}
+          className="group relative overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none transition-all duration-200 flex items-center gap-2"
+        >
+          <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
+          <span className="relative flex items-center gap-2">
             {locale === "ar" ? "معاينة وإنتاج" : "Preview & Generate"}
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              />
-            </svg>
-          </button>
-        </SignedIn>
-        <SignedOut>
-          <SignInButton mode="modal">
-            <button className="rounded-full border-2 border-gold/40 bg-gold/10 px-8 py-3.5 text-sm font-semibold text-gold hover:bg-gold/20 flex items-center gap-2">
-              <CrescentMoonIcon className="h-4 w-4" />
-              {locale === "ar" ? "سجل الدخول للمتابعة" : "Sign in to continue"}
-            </button>
-          </SignInButton>
-        </SignedOut>
+            <IslamicStarIcon className="h-4 w-4 transition-transform group-hover:rotate-45" />
+          </span>
+        </button>
       </div>
     </div>
   );
@@ -656,5 +643,67 @@ function SwitchRow({
       </div>
       <span className="text-sm text-parchment-muted">{label}</span>
     </label>
+  );
+}
+
+function VideoPreviewPlayer({ url }: { url: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    setPlaying(false);
+    setProgress(0);
+  }, [url]);
+
+  const togglePlay = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().then(() => setPlaying(true)).catch(() => {});
+    } else {
+      el.pause();
+      setPlaying(false);
+    }
+  }, []);
+
+  const handleTimeUpdate = useCallback(() => {
+    const el = videoRef.current;
+    if (el && el.duration) {
+      setProgress((el.currentTime / el.duration) * 100);
+    }
+  }, []);
+
+  return (
+    <div className="relative group">
+      <video
+        ref={videoRef}
+        src={url}
+        muted
+        loop
+        playsInline
+        className="w-full aspect-video object-cover"
+        onTimeUpdate={handleTimeUpdate}
+        onEnded={() => setPlaying(false)}
+      />
+      <div
+        className="absolute inset-0 flex items-center justify-center cursor-pointer bg-black/20 group-hover:bg-black/30 transition-colors"
+        onClick={togglePlay}
+      >
+        <div className="h-10 w-10 rounded-full bg-gold/30 backdrop-blur-sm flex items-center justify-center hover:bg-gold/50 transition-colors">
+          {playing ? (
+            <PauseIcon className="h-5 w-5 text-parchment" />
+          ) : (
+            <PlayIcon className="h-5 w-5 text-parchment ml-0.5" />
+          )}
+        </div>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/30">
+        <div
+          className="h-full bg-gold/80 transition-all duration-200"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
   );
 }

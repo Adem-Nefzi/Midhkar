@@ -71,8 +71,6 @@ export function useI18n() {
 const translations = {
   en: {
     nav: {
-      signIn: "Sign in",
-      getStarted: "Get started",
       create: "Start creating",
     },
     hero: {
@@ -83,7 +81,6 @@ const translations = {
       description:
         "Choose a surah, a reciter, and a few verses. Midhkar turns them into a short video you can post anywhere — no editing skills, no cost, ever.",
       ctaPrimary: "Start creating",
-      ctaSecondary: "Sign in",
       verse:
         "And We have certainly made the Qur'an easy to remember. So is there anyone who will be mindful?",
       verseRef: "— Surah Al-Qamar, 54:17",
@@ -126,8 +123,6 @@ const translations = {
   },
   fr: {
     nav: {
-      signIn: "Se connecter",
-      getStarted: "Commencer",
       create: "Créer",
     },
     hero: {
@@ -138,7 +133,6 @@ const translations = {
       description:
         "Choisissez une sourate, un récitateur et quelques versets. Midhkar les transforme en une courte vidéo que vous pouvez publier partout — sans compétences en montage, sans frais, jamais.",
       ctaPrimary: "Commencer à créer",
-      ctaSecondary: "Se connecter",
       verse:
         "Nous avons certes rendu le Coran facile pour la méditation. Y a-t-il donc quelqu'un pour y réfléchir ?",
       verseRef: "— Sourate Al-Qamar, 54:17",
@@ -181,8 +175,6 @@ const translations = {
   },
   ar: {
     nav: {
-      signIn: "تسجيل الدخول",
-      getStarted: "ابدأ الآن",
       create: "ابدأ الإنشاء",
     },
     hero: {
@@ -191,8 +183,6 @@ const translations = {
       title: "أعطِ القرآن صوتاً يستحق المشاركة.",
       description:
         "اختر سورة، وقارئاً، وآيات. يحولها مذكر إلى فيديو قصير يمكنك نشره في أي مكان — بدون مهارات تحرير، وبدون تكلفة، أبداً.",
-      ctaPrimary: "ابدأ الإنشاء",
-      ctaSecondary: "تسجيل الدخول",
       verse: "وَلَقَدْ يَسَّرْنَا الْقُرْآنَ لِلذِّكْرِ فَهَلْ مِن مُّدَّكِرٍ",
       verseRef: "— سورة القمر، ١٧",
     },
