@@ -31,7 +31,6 @@ interface Props {
   isGenerating: boolean;
   genLogs: GenLog[];
   resultVideoUrl: string | null;
-  ffmpegReady: boolean;
   onGenerate: () => void;
   onCancel: () => void;
   onReset: () => void; // clear result, keep settings
@@ -53,7 +52,6 @@ export function StepGenerate({
   isGenerating,
   genLogs,
   resultVideoUrl,
-  ffmpegReady,
   onGenerate,
   onCancel,
   onReset,
@@ -225,19 +223,6 @@ export function StepGenerate({
                 ? "يستخدم FFmpeg.wasm لدمج الصوت والصورة مباشرةً في المتصفح."
                 : "FFmpeg.wasm merges audio & video directly in your browser. First load downloads the encoder (~10 MB)."}
             </p>
-            {!ffmpegReady ? (
-              <p className="text-amber-400/70 flex items-center gap-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400/60 animate-pulse" />
-                {locale === "ar"
-                  ? "جاري تحميل المحرك…"
-                  : "Loading encoder in background…"}
-              </p>
-            ) : (
-              <p className="text-verdant/60 flex items-center gap-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-verdant/60" />
-                {locale === "ar" ? "المحرك جاهز" : "Encoder ready"}
-              </p>
-            )}
           </div>
         </div>
       </div>

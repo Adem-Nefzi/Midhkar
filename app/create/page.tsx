@@ -1,6 +1,21 @@
 "use client";
-import { VideoBuilder } from "@/components/VideoBuilder/VideoBuilder";
+import dynamic from "next/dynamic";
 import { I18nProvider } from "@/lib/i18n";
+
+const VideoBuilder = dynamic(
+  () =>
+    import("@/components/VideoBuilder/VideoBuilder").then(
+      (m) => m.VideoBuilder,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex justify-center py-20">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold/30 border-t-gold" />
+      </div>
+    ),
+  },
+);
 
 export default function CreatePage() {
   return (

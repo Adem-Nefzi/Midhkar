@@ -18,6 +18,7 @@ export interface VideoSettings {
   showSurahName: boolean;
   showVerseNumber: boolean;
   uploadedVideoUrl: string | null;
+  uploadedVideoFile: File | null;
   videoUrl: string | null;
   videoThumb: string | null;
   textShadow: boolean;
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   showSurahName: true,
   showVerseNumber: true,
   uploadedVideoUrl: null,
+  uploadedVideoFile: null,
   videoUrl: null,
   videoThumb: null,
   textShadow: true,

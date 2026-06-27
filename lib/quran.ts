@@ -207,15 +207,4 @@ export function getEveryayahAudioUrl(
   return `https://everyayah.com/data/${entry.folder}/${surahStr}${ayahStr}.mp3`;
 }
 
-export function getGlobalAyahNumber(
-  surahNumber: number,
-  ayahNumberInSurah: number,
-  surahs: Surah[],
-): number {
-  let global = 0;
-  for (let i = 0; i < surahNumber - 1; i++) {
-    const s = surahs.find((s) => s.number === i + 1);
-    global += s?.numberOfAyahs ?? 7;
-  }
-  return global + ayahNumberInSurah;
-}
+

@@ -56,21 +56,12 @@ export const metadata: Metadata = {
     title: "Midhkar — Turn Quran Verses into Video",
     description:
       "Pick a surah, a reciter, and a few verses. Midhkar turns them into a professional short video you can share anywhere.",
-    images: [
-      {
-        url: "/og-image.png",
-        width: 1200,
-        height: 630,
-        alt: "Midhkar — Quran Video Studio",
-      },
-    ],
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: "Midhkar — Turn Quran Verses into Video",
     description:
       "Pick a surah, a reciter, and a few verses. Midhkar turns them into a professional short video you can share anywhere.",
-    images: ["/og-image.png"],
   },
   robots: {
     index: true,

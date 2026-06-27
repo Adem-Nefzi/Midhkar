@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Scheherazade+New:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&family=Noto+Kufi+Arabic:wght@400;700&family=Lateef&family=Reem+Kufi:wght@400;700&family=Cairo:wght@400;700&family=Tajawal:wght@400;700&family=Almarai:wght@400;700&family=IBM+Plex+Sans+Arabic:wght@400;700&family=Vazirmatn:wght@400;700&family=Readex+Pro:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Scheherazade+New:wght@400;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -77,33 +77,6 @@
   }
 
   /* ── Islamic Geometric Border Patterns ─────────────────────────── */
-  .islamic-border-top,
-  .islamic-border-bottom {
-    position: relative;
-  }
-  .islamic-border-top::before,
-  .islamic-border-bottom::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(212, 175, 55, 0.3) 15%,
-      rgba(212, 175, 55, 0.6) 50%,
-      rgba(212, 175, 55, 0.3) 85%,
-      transparent 100%
-    );
-  }
-  .islamic-border-top::before {
-    top: 0;
-  }
-  .islamic-border-bottom::after {
-    bottom: 0;
-  }
-
   .islamic-corner {
     position: absolute;
     width: 24px;
@@ -200,26 +173,6 @@
   }
 
   /* ── Other Decorative Classes ──────────────────────────────── */
-  .bismillah-accent {
-    position: relative;
-    display: inline-block;
-  }
-  .bismillah-accent::after {
-    content: "";
-    position: absolute;
-    bottom: -8px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 60px;
-    height: 2px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(212, 175, 55, 0.5),
-      transparent
-    );
-  }
-
   .surah-card-motif {
     position: relative;
     overflow: hidden;
@@ -286,19 +239,6 @@
     line-height: 1;
   }
 
-  .mamluk-border {
-    border: 2px solid transparent;
-    border-image: linear-gradient(
-        135deg,
-        rgba(212, 175, 55, 0.4) 0%,
-        rgba(212, 175, 55, 0.1) 25%,
-        rgba(212, 175, 55, 0.4) 50%,
-        rgba(212, 175, 55, 0.1) 75%,
-        rgba(212, 175, 55, 0.4) 100%
-      )
-      1;
-  }
-
   .lantern-glow {
     position: relative;
   }
@@ -315,20 +255,6 @@
       rgba(212, 175, 55, 0.08) 0%,
       transparent 70%
     );
-    pointer-events: none;
-  }
-
-  .crescent-accent {
-    position: relative;
-  }
-  .crescent-accent::before {
-    content: "";
-    position: absolute;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    box-shadow: -8px 0 0 0 rgba(212, 175, 55, 0.2);
-    transform: rotate(-30deg);
     pointer-events: none;
   }
 

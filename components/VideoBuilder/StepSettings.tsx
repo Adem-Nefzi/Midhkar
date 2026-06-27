@@ -31,7 +31,6 @@ interface Props {
   recitersLoading: boolean;
   selectedReciter: Reciter | null;
   onSelectReciter: (r: Reciter) => void;
-  ffmpegReady: boolean;
   // Audio preview
   audioPlaying: boolean;
   audioLoading: boolean;
@@ -57,7 +56,6 @@ export function StepSettings({
   recitersLoading,
   selectedReciter,
   onSelectReciter,
-  ffmpegReady,
   audioPlaying,
   audioLoading,
   audioError,
@@ -82,12 +80,6 @@ export function StepSettings({
         <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
           {locale === "ar" ? "القارئ والإعدادات" : "Reciter & Settings"}
         </h2>
-        {ffmpegReady && (
-          <p className="mt-2 text-xs text-verdant/70 flex items-center justify-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-verdant animate-pulse inline-block" />
-            {locale === "ar" ? "محرك الفيديو جاهز" : "Video encoder ready"}
-          </p>
-        )}
       </div>
 
       <div className="grid gap-8 lg:grid-cols-3">

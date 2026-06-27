@@ -108,9 +108,9 @@ export function VideoBuilder() {
   const [isGenerating,   setIsGenerating]   = useState(false);
   const [genLogs,        setGenLogs]        = useState<GenLog[]>([]);
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
-  const [ffmpegReady,    setFfmpegReady]    = useState(false);
   const abortRef    = useRef<AbortController | null>(null);
-  const bgVideoRef  = useRef<HTMLVideoElement>(null);
+  const bgVideoRef     = useRef<HTMLVideoElement>(null);
+  const bgVideoBytesRef = useRef<Uint8Array | null>(null);
 
   /* ── Audio preview ─────────────────────────────────────────── */
   const [audioPlaying, setAudioPlaying] = useState(false);
@@ -205,12 +205,20 @@ export function VideoBuilder() {
     stopAudio();
   }, [stopAudio]);
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("video/")) return;
     if (file.size > 150 * 1024 * 1024) return;
-    setSettings((s) => ({ ...s, background: "upload", uploadedVideoUrl: URL.createObjectURL(file) }));
+    // Read bytes eagerly into a ref — avoids blob: URL fetch issues
+    const buf = await file.arrayBuffer();
+    bgVideoBytesRef.current = new Uint8Array(buf);
+    setSettings((s) => ({
+      ...s,
+      background: "upload",
+      uploadedVideoUrl: URL.createObjectURL(file),
+      uploadedVideoFile: file,
+    }));
   }, []);
 
   const handleToggleAudio = useCallback(async () => {
@@ -276,12 +284,13 @@ export function VideoBuilder() {
 
     try {
       const blob = await generateVideo({
-        ayahs:     selectedAyahsData,
-        surah:     selectedSurah,
-        reciter:   selectedReciter,
+        ayahs:          selectedAyahsData,
+        surah:          selectedSurah,
+        reciter:        selectedReciter,
         settings,
-        platform:  selectedPlatform,
-        bgVideoEl: bgEl,
+        platform:       selectedPlatform,
+        bgVideoEl:      bgEl,
+        bgVideoBytes:   bgVideoBytesRef.current,
         onLog:     (log) => setGenLogs((prev) => [...prev.slice(-6), log]),
         signal:    ctrl.signal,
       });
@@ -393,7 +402,6 @@ export function VideoBuilder() {
             recitersLoading={recitersLoading}
             selectedReciter={selectedReciter}
             onSelectReciter={handleSelectReciter}
-            ffmpegReady={ffmpegReady}
             audioPlaying={audioPlaying}
             audioLoading={audioLoading}
             audioError={audioError}
@@ -423,7 +431,6 @@ export function VideoBuilder() {
             isGenerating={isGenerating}
             genLogs={genLogs}
             resultVideoUrl={resultVideoUrl}
-            ffmpegReady={ffmpegReady}
             onGenerate={handleGenerate}
             onCancel={() => abortRef.current?.abort()}
             onReset={() => { setResultVideoUrl(null); setGenLogs([]); }}

@@ -1,24 +1,33 @@
 /**
  * generate-video.ts
  *
+ * Fully client-side video generation using @ffmpeg/ffmpeg (WASM).
+ * No server roundtrip — frames, audio, and encoding all happen in the browser.
+ *
  * Pipeline:
  *  1. For each ayah: download MP3, render a frame, measure audio duration.
- *     - If the chosen background is a real VIDEO (upload / library), the
- *       frame is rendered with a TRANSPARENT canvas — text/badges only, no
- *       baked-in background — so the server can composite it over the
- *       actual looping background video per segment (real motion, not a
- *       single freeze-frame like before).
- *     - Otherwise (animated canvas bg / none), behavior is unchanged: an
- *       opaque baked frame, exactly as before.
- *  2. Upload everything (frames, audio, and — once — the background video
- *     bytes if applicable) to /api/generate-video, which runs real ffmpeg
- *     server-side and returns output.mp4.
+ *  2. Load ffmpeg WASM (cached after first load).
+ *  3. Write all assets to ffmpeg's virtual filesystem.
+ *  4. Encode each segment (image + audio → mp4).
+ *  5. Concat all segments into the final output.
+ *  6. Return as Blob for download.
  */
 
-import { PLATFORMS } from "@/lib/quran";
+import {
+  getFFmpeg,
+  writeFFmpegFile,
+  readFFmpegFile,
+  runFFmpeg,
+  cleanupFFmpegFiles,
+} from "./ffmpeg-client";
+import { PLATFORMS, getQuranApiAudioUrl, getEveryayahAudioUrl } from "@/lib/quran";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, GenLog } from "./types";
 import { canvasToPNG, drawAyahFrame, drawBackground } from "./canva-utils";
+
+/* ── Constants ───────────────────────────────────────────────── */
+
+const LEAD_IN = 0.35; // seconds of text shown before audio starts
 
 /* ── Silence generator (pure JS → WAV) ───────────────────────── */
 
@@ -54,8 +63,6 @@ export function getAudioUrls(
   surahNum: number,
   ayahNum: number,
 ): string[] {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getQuranApiAudioUrl, getEveryayahAudioUrl } = require("@/lib/quran");
   const urls: string[] = [];
   if (reciter.source === "quranapi" && reciter.quranApiNo) {
     urls.push(getQuranApiAudioUrl(reciter.quranApiNo, surahNum, ayahNum));
@@ -89,59 +96,22 @@ async function measureAudioDuration(buffer: ArrayBuffer): Promise<number> {
   }
 }
 
-/* ── Background video resolution (for real motion backgrounds) ─ */
-
-/**
- * Returns the raw bytes of the chosen background video, if the background
- * type is a real video ("upload" or "library"). Works for both:
- *  - "upload": settings.uploadedVideoUrl is a blob: URL created via
- *    URL.createObjectURL() in this same page — fetchable directly here.
- *  - "library": settings.videoUrl is a normal https:// CDN URL.
- * Returns null if not applicable, or if the fetch fails (caller falls
- * back to the old opaque-frame behavior automatically in that case).
- */
-async function resolveBackgroundVideoBlob(
-  settings: VideoSettings,
-): Promise<Blob | null> {
-  const isVideoBg =
-    settings.background === "upload" || settings.background === "library";
-  if (!isVideoBg) return null;
-
-  const src =
-    settings.background === "upload"
-      ? settings.uploadedVideoUrl
-      : settings.videoUrl;
-  if (!src) return null;
-
-  try {
-    const r = await fetch(src);
-    if (!r.ok) return null;
-    return await r.blob();
-  } catch {
-    return null;
-  }
-}
-
-/* ── New styling helpers (pure canvas, no canva-utils changes needed) ─ */
+/* ── Canvas styling helpers ────────────────────────────────────── */
 
 function drawOverlayStyle(
   ctx: CanvasRenderingContext2D,
   cw: number,
   ch: number,
   style: VideoSettings["overlayStyle"],
-  intensityPct: number, // 0-100
+  intensityPct: number,
 ) {
   if (style === "none" || intensityPct <= 0) return;
   const alpha = Math.min(0.85, (intensityPct / 100) * 0.85);
   let gradient: CanvasGradient;
   if (style === "radial") {
     gradient = ctx.createRadialGradient(
-      cw / 2,
-      ch / 2,
-      Math.min(cw, ch) * 0.2,
-      cw / 2,
-      ch / 2,
-      Math.max(cw, ch) * 0.7,
+      cw / 2, ch / 2, Math.min(cw, ch) * 0.2,
+      cw / 2, ch / 2, Math.max(cw, ch) * 0.7,
     );
     gradient.addColorStop(0, "rgba(0,0,0,0)");
     gradient.addColorStop(1, `rgba(0,0,0,${alpha})`);
@@ -181,10 +151,6 @@ interface Segment {
   audioExt: "mp3" | "wav";
   img: Uint8Array;
   dur: number;
-  /** True when img is a transparent overlay meant to be composited over
-   *  the shared background video server-side, rather than a flattened,
-   *  opaque frame. */
-  transparentOverlay: boolean;
 }
 
 /* ── Main export ──────────────────────────────────────────────── */
@@ -196,6 +162,7 @@ export async function generateVideo(params: {
   settings: VideoSettings;
   platform: (typeof PLATFORMS)[0];
   bgVideoEl: HTMLVideoElement | null;
+  bgVideoBytes: Uint8Array | null;
   onLog: (log: GenLog) => void;
   signal: AbortSignal;
 }): Promise<Blob> {
@@ -206,6 +173,7 @@ export async function generateVideo(params: {
     settings,
     platform,
     bgVideoEl,
+    bgVideoBytes,
     onLog,
     signal,
   } = params;
@@ -222,40 +190,46 @@ export async function generateVideo(params: {
   canvas.height = ch;
   const ctx = canvas.getContext("2d")!;
 
-  // ── 0. Resolve background video bytes once (if applicable) ──
-  log("Preparing background…", 3);
-  const bgVideoBlob = await resolveBackgroundVideoBlob(settings);
-  // Only treat segments as "transparent overlay" if we actually got bytes —
-  // otherwise fall back cleanly to the old opaque-frame path below.
-  const useTransparentOverlay = bgVideoBlob !== null;
+  // ── 0. Resolve background video bytes (if applicable) ─────
+  log("Preparing background...", 3);
+
+  let bgVideoData: Uint8Array | null = null;
+
+  // Priority 1: pre-read bytes from upload (avoids blob: URL fetch)
+  if (bgVideoBytes && (settings.background === "upload" || settings.background === "library")) {
+    bgVideoData = bgVideoBytes;
+  }
+  // Priority 2: library video — fetch from CDN URL
+  else if (settings.background === "library" && settings.videoUrl) {
+    try {
+      const r = await fetch(settings.videoUrl);
+      if (r.ok) bgVideoData = new Uint8Array(await r.arrayBuffer());
+    } catch { /* fall through to static bg */ }
+  }
+  // Priority 3: uploaded video — try the raw File object
+  else if (settings.background === "upload" && settings.uploadedVideoFile) {
+    try {
+      bgVideoData = new Uint8Array(await settings.uploadedVideoFile.arrayBuffer());
+    } catch { /* fall through to static bg */ }
+  }
+
+  const useVideoBg = bgVideoData !== null;
 
   const renderFrame = (ayah: Ayah | null) => {
     ctx.clearRect(0, 0, cw, ch);
-    if (!useTransparentOverlay) {
-      drawBackground(
-        ctx,
-        cw,
-        ch,
-        settings.background,
-        bgVideoEl,
-        settings.bgOverlay,
-      );
+    if (!useVideoBg) {
+      drawBackground(ctx, cw, ch, settings.background, bgVideoEl, settings.bgOverlay);
     }
     drawOverlayStyle(
-      ctx,
-      cw,
-      ch,
-      settings.overlayStyle,
-      useTransparentOverlay
-        ? settings.bgOverlay
-        : Math.min(settings.bgOverlay, 40),
+      ctx, cw, ch, settings.overlayStyle,
+      useVideoBg ? settings.bgOverlay : Math.min(settings.bgOverlay, 40),
     );
     drawAyahFrame(ctx, canvas, ayah, surah, settings, platform);
-    if (settings.showWatermark)
-      drawWatermark(ctx, cw, ch, settings.watermarkText);
+    if (settings.showWatermark) drawWatermark(ctx, cw, ch, settings.watermarkText);
   };
 
-  // ── 1. Build segments ────────────────────────────────────────
+  // ── 1. Build segments ────────────────────────────────────
+  log("Downloading audio & rendering frames...", 5);
   const segments: Segment[] = [];
 
   for (let i = 0; i < ayahs.length; i++) {
@@ -263,8 +237,8 @@ export async function generateVideo(params: {
 
     const ayah = ayahs[i];
     log(
-      `Preparing ayah ${ayah.numberInSurah} (${i + 1}/${ayahs.length})…`,
-      5 + Math.round((i / ayahs.length) * 45),
+      `Preparing ayah ${ayah.numberInSurah} (${i + 1}/${ayahs.length})...`,
+      5 + Math.round((i / ayahs.length) * 35),
     );
 
     const audioUrls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
@@ -278,73 +252,221 @@ export async function generateVideo(params: {
       audioExt: rawAudio ? "mp3" : "wav",
       img: await canvasToPNG(canvas),
       dur,
-      transparentOverlay: useTransparentOverlay,
     });
   }
 
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-  // ── 2. Upload to server for real-ffmpeg encoding ────────────
-  log("Uploading for encoding...", 55);
+  // ── 2. Load ffmpeg WASM ──────────────────────────────────
+  log("Loading video encoder...", 42);
+  const ffmpeg = await getFFmpeg();
+  log("Encoder ready.", 48);
 
-  const LEAD_IN = 0.35; // seconds of text shown before audio starts
+  // ── 3. Write assets to virtual FS ────────────────────────
+  log("Preparing assets for encoding...", 50);
+  const cleanupPaths: string[] = [];
 
-  const form = new FormData();
-  form.append(
-    "meta",
-    JSON.stringify({
-      width: cw,
-      height: ch,
-      segments: segments.map((s) => ({
-        dur: s.dur + LEAD_IN,
-        audioExt: s.audioExt,
-        transparentOverlay: s.transparentOverlay,
-        leadIn: LEAD_IN,
-      })),
-    }),
-  );
-  segments.forEach((s, i) => {
-    form.append(
-      `frame_${i}`,
-      new Blob([s.img.buffer as BlobPart], { type: "image/png" }),
-      `frame_${i}.png`,
-    );
-    form.append(`audio_${i}`, new Blob([s.audio.buffer as BlobPart]), `audio_${i}.${s.audioExt}`);
-  });
-  if (useTransparentOverlay && bgVideoBlob) {
-    form.append("background_video", bgVideoBlob, "background_video");
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    const frameName = `frame_${i}.png`;
+    const audioName = `audio_${i}.${s.audioExt}`;
+    await writeFFmpegFile(ffmpeg, frameName, s.img);
+    await writeFFmpegFile(ffmpeg, audioName, s.audio);
+    cleanupPaths.push(frameName, audioName, `seg_${i}.mp4`);
   }
 
-  return new Promise<Blob>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/generate-video");
-    xhr.responseType = "blob";
+  if (useVideoBg && bgVideoData) {
+    await writeFFmpegFile(ffmpeg, "bg_video", bgVideoData);
+    cleanupPaths.push("bg_video");
+  }
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        log(
-          "Uploading for encoding…",
-          55 + Math.round((e.loaded / e.total) * 25),
-        );
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        log("Finalising…", 99);
-        resolve(xhr.response as Blob);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => reject(new Error(String(reader.result)));
-      reader.onerror = () =>
-        reject(new Error(`Encoding failed (${xhr.status})`));
-      reader.readAsText(xhr.response as Blob);
-    };
-    xhr.onerror = () => reject(new Error("Network error while uploading"));
-    xhr.onabort = () => reject(new DOMException("Aborted", "AbortError"));
-    signal.addEventListener("abort", () => xhr.abort());
+  // ── 4. Encode segments ───────────────────────────────────
+  const totalSegs = segments.length;
 
-    log("Encoding on server…", 82);
-    xhr.send(form);
-  });
+  if (useVideoBg) {
+    // ── CONTINUOUS BACKGROUND MODE ─────────────────────────
+    // Concat all audio, then create a single video with
+    // the bg looping and text overlays switching at timestamps.
+
+    // 4a. Add lead-in silence to each audio, then concat
+    log("Mixing audio with lead-in silence...", 52);
+    const audioList: string[] = [];
+
+    for (let i = 0; i < totalSegs; i++) {
+      const paddedName = `padded_${i}.aac`;
+      await runFFmpeg(ffmpeg, [
+        "-y", "-f", "lavfi", "-t", String(LEAD_IN),
+        "-i", "anullsrc=r=44100:cl=stereo",
+        "-i", `audio_${i}.${segments[i].audioExt}`,
+        "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[out]",
+        "-map", "[out]", "-c:a", "aac", "-b:a", "128k",
+        "-ar", "44100", "-ac", "2", paddedName,
+      ]);
+      audioList.push(`file '${paddedName}'`);
+      cleanupPaths.push(paddedName);
+    }
+
+    await writeFFmpegFile(
+      ffmpeg,
+      "audio_concat.txt",
+      new TextEncoder().encode(audioList.join("\n")),
+    );
+    cleanupPaths.push("audio_concat.txt", "full_audio.m4a");
+
+    await runFFmpeg(ffmpeg, [
+      "-y", "-f", "concat", "-safe", "0",
+      "-i", "audio_concat.txt",
+      "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+      "full_audio.m4a",
+    ]);
+
+    // 4b. Build overlay filter for continuous bg
+    log("Encoding video with continuous background...", 60);
+    const timestamps: { start: number; end: number }[] = [];
+    let cumTime = 0;
+    for (const seg of segments) {
+      timestamps.push({ start: cumTime, end: cumTime + seg.dur + LEAD_IN });
+      cumTime += seg.dur + LEAD_IN;
+    }
+    const totalDur = cumTime;
+
+    const filterParts: string[] = [];
+    filterParts.push(
+      `[0:v]scale=${cw}:${ch}:force_original_aspect_ratio=increase,` +
+      `crop=${cw}:${ch},setsar=1,trim=duration=${totalDur.toFixed(3)},setpts=PTS-STARTPTS[bg]`,
+    );
+
+    let prevLabel = "bg";
+    for (let i = 0; i < totalSegs; i++) {
+      const { start, end } = timestamps[i];
+      const outLabel = i === totalSegs - 1 ? "v" : `v${i}`;
+      filterParts.push(
+        `[${prevLabel}][${i + 1}:v]overlay=0:0:format=auto:` +
+        `enable='between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})'` +
+        `[${outLabel}]`,
+      );
+      prevLabel = outLabel;
+    }
+
+    const inputs: string[] = ["-y", "-stream_loop", "-1", "-i", "bg_video"];
+    for (let i = 0; i < totalSegs; i++) {
+      inputs.push("-loop", "1", "-t", String(segments[i].dur + LEAD_IN), "-i", `frame_${i}.png`);
+    }
+    inputs.push("-i", "full_audio.m4a");
+
+    const audioMapIdx = totalSegs + 1;
+
+    await runFFmpeg(ffmpeg, [
+      ...inputs,
+      "-filter_complex", filterParts.join(";"),
+      "-map", "[v]", "-map", `${audioMapIdx}:a`,
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+      "-r", "24", "-t", String(totalDur.toFixed(3)),
+      "-movflags", "+faststart",
+      "output.mp4",
+    ]);
+  } else {
+    // ── STATIC BACKGROUND MODE ─────────────────────────────
+    // Same single-pass approach: concat audio, overlay frames.
+
+    // 4c. Add lead-in silence to each audio, then concat
+    log("Mixing audio...", 52);
+    const audioList: string[] = [];
+
+    for (let i = 0; i < totalSegs; i++) {
+      const paddedName = `padded_${i}.aac`;
+      await runFFmpeg(ffmpeg, [
+        "-y", "-f", "lavfi", "-t", String(LEAD_IN),
+        "-i", "anullsrc=r=44100:cl=stereo",
+        "-i", `audio_${i}.${segments[i].audioExt}`,
+        "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[out]",
+        "-map", "[out]", "-c:a", "aac", "-b:a", "128k",
+        "-ar", "44100", "-ac", "2", paddedName,
+      ]);
+      audioList.push(`file '${paddedName}'`);
+      cleanupPaths.push(paddedName);
+    }
+
+    await writeFFmpegFile(
+      ffmpeg,
+      "audio_concat.txt",
+      new TextEncoder().encode(audioList.join("\n")),
+    );
+    cleanupPaths.push("audio_concat.txt", "full_audio.m4a");
+
+    await runFFmpeg(ffmpeg, [
+      "-y", "-f", "concat", "-safe", "0",
+      "-i", "audio_concat.txt",
+      "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+      "full_audio.m4a",
+    ]);
+
+    // 4d. Build overlay filter — same as video bg mode
+    log("Encoding video...", 65);
+    const timestamps: { start: number; end: number }[] = [];
+    let cumTime = 0;
+    for (const seg of segments) {
+      timestamps.push({ start: cumTime, end: cumTime + seg.dur + LEAD_IN });
+      cumTime += seg.dur + LEAD_IN;
+    }
+    const totalDur = cumTime;
+
+    // Render a single background frame (the first ayah's baked frame)
+    const bgName = "static_bg.png";
+    await writeFFmpegFile(ffmpeg, bgName, segments[0].img);
+    cleanupPaths.push(bgName);
+
+    const filterParts: string[] = [];
+    // Scale the static background to target size
+    filterParts.push(
+      `[0:v]scale=${cw}:${ch},setsar=1,` +
+      `trim=duration=${totalDur.toFixed(3)},setpts=PTS-STARTPTS[bg]`,
+    );
+
+    // Overlay each text frame at the right timestamp
+    let prevLabel = "bg";
+    for (let i = 0; i < totalSegs; i++) {
+      const { start, end } = timestamps[i];
+      const outLabel = i === totalSegs - 1 ? "v" : `v${i}`;
+      filterParts.push(
+        `[${prevLabel}][${i + 1}:v]overlay=0:0:format=auto:` +
+        `enable='between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})'` +
+        `[${outLabel}]`,
+      );
+      prevLabel = outLabel;
+    }
+
+    // Inputs: [0] = static bg, [1..N] = text frames, [N+1] = audio
+    const inputs: string[] = ["-y", "-loop", "1", "-t", String(totalDur.toFixed(3)), "-i", bgName];
+    for (let i = 0; i < totalSegs; i++) {
+      inputs.push("-loop", "1", "-t", String(segments[i].dur + LEAD_IN), "-i", `frame_${i}.png`);
+    }
+    inputs.push("-i", "full_audio.m4a");
+
+    const audioMapIdx = totalSegs + 1;
+
+    await runFFmpeg(ffmpeg, [
+      ...inputs,
+      "-filter_complex", filterParts.join(";"),
+      "-map", "[v]", "-map", `${audioMapIdx}:a`,
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+      "-r", "24", "-t", String(totalDur.toFixed(3)),
+      "-movflags", "+faststart",
+      "output.mp4",
+    ]);
+  }
+
+  // ── 5. Read output ───────────────────────────────────────
+  log("Finalising...", 96);
+  const outputData = await readFFmpegFile(ffmpeg, "output.mp4");
+
+  // ── 6. Cleanup virtual FS ────────────────────────────────
+  await cleanupFFmpegFiles(ffmpeg, cleanupPaths);
+
+  log("Done!", 100);
+  return new Blob([outputData.buffer as BlobPart], { type: "video/mp4" });
 }
