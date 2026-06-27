@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter, Amiri } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -82,9 +84,9 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "https://midhkar.com",
     languages: {
-      "en": "https://midhkar.com",
-      "ar": "https://midhkar.com?lang=ar",
-      "fr": "https://midhkar.com?lang=fr",
+      en: "https://midhkar.com",
+      ar: "https://midhkar.com?lang=ar",
+      fr: "https://midhkar.com?lang=fr",
     },
   },
 };
@@ -128,7 +130,11 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        <Analytics />
+        <SpeedInsights />
+        {children}
+      </body>
     </html>
   );
 }
