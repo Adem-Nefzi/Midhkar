@@ -180,7 +180,7 @@ export function StepSurah({
                 <button
                   key={s.number}
                   onClick={() => onSelect(s)}
-                  className={`group relative rounded-full border px-4 py-2 text-xs transition-all duration-200 hover:-translate-y-0.5 ${
+                  className={`group relative rounded-full border px-4 py-2.5 text-xs transition-all duration-200 hover:-translate-y-0.5 ${
                     isActive
                       ? "border-gold/50 bg-gold/15 text-gold shadow-sm shadow-gold/10"
                       : "border-gold/15 bg-ink-light/30 text-parchment-muted hover:border-gold/30 hover:text-parchment hover:bg-ink-light/50"
@@ -224,7 +224,7 @@ export function StepSurah({
                 ? "ابحث بالاسم أو الرقم..."
                 : "Search by name, English, or number..."
             }
-            className="w-full rounded-sm border border-gold/20 bg-ink-light/40 px-4 py-3 pl-10 pr-16 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 focus:bg-ink-light/60 transition-all"
+            className="w-full rounded-sm border border-gold/20 bg-ink-light/40 px-4 py-3 pl-10 pr-4 sm:pr-16 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 focus:bg-ink-light/60 transition-all"
           />
           <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5 rounded border border-gold/15 bg-ink/50 px-1.5 py-0.5 text-[10px] text-parchment-muted/40 font-mono">
             ⌘K

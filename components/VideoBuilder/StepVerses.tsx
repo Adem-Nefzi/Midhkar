@@ -119,7 +119,7 @@ export function StepVerses({
             <button
               key={preset.id}
               onClick={() => onPreset(preset.id)}
-              className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-all duration-200 hover:-translate-y-px ${
+              className={`rounded-full border px-4 py-2.5 text-xs font-medium transition-all duration-200 hover:-translate-y-px ${
                 active
                   ? "border-gold/50 bg-gold/15 text-gold shadow-sm shadow-gold/10 ring-1 ring-gold/20"
                   : "border-gold/15 bg-ink-light/30 text-parchment-muted hover:border-gold/30 hover:text-gold hover:bg-ink-light/50"

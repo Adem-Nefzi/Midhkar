@@ -44,25 +44,25 @@ export function Hero() {
           CENTRAL SHAMSAH — Large sunburst medallion
           Like opening a Qur'an to a carpet page
       ============================================================ */}
-      <div className="absolute left-1/2 top-1/2 h-[900px] w-[900px] -translate-x-1/2 -translate-y-1/2">
+      <div className="absolute left-1/2 top-1/2 h-[400px] w-[400px] sm:h-[600px] sm:w-[600px] lg:h-[900px] lg:w-[900px] -translate-x-1/2 -translate-y-1/2">
         <div className="absolute inset-0 animate-shamsah-pulse rounded-full bg-gradient-radial from-gold/[0.06] via-gold/[0.02] to-transparent" />
-        <div className="absolute left-1/2 top-1/2 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gold/[0.04] blur-[80px]" />
+        <div className="absolute left-1/2 top-1/2 h-[200px] w-[200px] sm:h-[300px] sm:w-[300px] lg:h-[400px] lg:w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gold/[0.04] blur-[80px]" />
       </div>
 
       {/* ============================================================
           CORNER QUARTER-MEDALLIONS
           Like the four corners of a Qur'an carpet page
       ============================================================ */}
-      <div className="absolute -top-10 -left-10 h-[350px] w-[350px] opacity-60">
+      <div className="absolute -top-10 -left-10 h-[180px] w-[180px] sm:h-[250px] sm:w-[250px] lg:h-[350px] lg:w-[350px] opacity-60">
         <QuarterMedallion />
       </div>
-      <div className="absolute -top-10 -right-10 h-[350px] w-[350px] opacity-60 rotate-90">
+      <div className="absolute -top-10 -right-10 h-[180px] w-[180px] sm:h-[250px] sm:w-[250px] lg:h-[350px] lg:w-[350px] opacity-60 rotate-90">
         <QuarterMedallion />
       </div>
-      <div className="absolute -bottom-10 -left-10 h-[350px] w-[350px] opacity-60 -rotate-90">
+      <div className="absolute -bottom-10 -left-10 h-[180px] w-[180px] sm:h-[250px] sm:w-[250px] lg:h-[350px] lg:w-[350px] opacity-60 -rotate-90">
         <QuarterMedallion />
       </div>
-      <div className="absolute -bottom-10 -right-10 h-[350px] w-[350px] opacity-60 rotate-180">
+      <div className="absolute -bottom-10 -right-10 h-[180px] w-[180px] sm:h-[250px] sm:w-[250px] lg:h-[350px] lg:w-[350px] opacity-60 rotate-180">
         <QuarterMedallion />
       </div>
 
@@ -340,7 +340,7 @@ export function Hero() {
       {/* ============================================================
           CONTENT
       ============================================================ */}
-      <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center px-6 py-28 text-center sm:py-36">
+      <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center px-6 py-20 text-center sm:py-28 lg:py-36">
         {/* Bismillah header */}
         <div className="relative inline-block mb-6">
           <p
@@ -377,7 +377,7 @@ export function Hero() {
         {hasVerse && (
           <blockquote
             dir="rtl"
-            className="mt-10 animate-fade-up relative rounded-sm border-2 border-gold/20 bg-gradient-to-b from-gold/[0.03] to-transparent p-8 opacity-0 [animation-delay:380ms]"
+            className="mt-10 animate-fade-up relative rounded-sm border-2 border-gold/20 bg-gradient-to-b from-gold/[0.03] to-transparent p-4 sm:p-6 md:p-8 opacity-0 [animation-delay:380ms]"
           >
             {/* Ornate corner marks */}
             <div className="absolute top-0 left-0 h-6 w-6 border-t-2 border-l-2 border-gold/30" />

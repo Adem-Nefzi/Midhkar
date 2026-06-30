@@ -22,7 +22,7 @@ export default function CreatePage() {
     <I18nProvider>
       <main className="relative min-h-screen bg-ink text-parchment antialiased selection:bg-gold/30 selection:text-ink overflow-hidden">
         {/* Girih tessellation background */}
-        <div className="absolute inset-0 opacity-[0.08] pointer-events-none">
+        <div className="absolute inset-0 opacity-[0.12] pointer-events-none">
           <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <pattern
@@ -66,24 +66,24 @@ export default function CreatePage() {
           className="absolute inset-0 pointer-events-none"
           style={{
             backgroundImage: `
-              linear-gradient(to right, rgba(212,175,55,0.05) 1px, transparent 1px),
-              linear-gradient(to bottom, rgba(212,175,55,0.05) 1px, transparent 1px)
+              linear-gradient(to right, rgba(212,175,55,0.06) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(212,175,55,0.06) 1px, transparent 1px)
             `,
             backgroundSize: "60px 60px",
           }}
         />
 
         {/* Corner medallions */}
-        <div className="absolute -top-6 -left-6 h-[200px] w-[200px] opacity-70 pointer-events-none">
+        <div className="absolute -top-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none">
           <QuarterMedallion />
         </div>
-        <div className="absolute -top-6 -right-6 h-[200px] w-[200px] opacity-70 pointer-events-none rotate-90">
+        <div className="absolute -top-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-90">
           <QuarterMedallion />
         </div>
-        <div className="absolute -bottom-6 -left-6 h-[200px] w-[200px] opacity-70 pointer-events-none -rotate-90">
+        <div className="absolute -bottom-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none -rotate-90">
           <QuarterMedallion />
         </div>
-        <div className="absolute -bottom-6 -right-6 h-[200px] w-[200px] opacity-70 pointer-events-none rotate-180">
+        <div className="absolute -bottom-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-180">
           <QuarterMedallion />
         </div>
 
@@ -98,9 +98,9 @@ export default function CreatePage() {
         </div>
 
         {/* Floating ambient orbs */}
-        <div className="absolute top-[10%] left-[5%] h-[350px] w-[350px] animate-float-1 rounded-full bg-gold/[0.05] blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-[15%] right-[8%] h-[300px] w-[300px] animate-float-2 rounded-full bg-gold/[0.04] blur-[80px] pointer-events-none" />
-        <div className="absolute top-[60%] left-[60%] h-[250px] w-[250px] animate-float-3 rounded-full bg-verdant/[0.03] blur-[70px] pointer-events-none" />
+        <div className="absolute top-[10%] left-[5%] h-[200px] w-[200px] sm:h-[280px] sm:w-[280px] lg:h-[350px] lg:w-[350px] animate-float-1 rounded-full bg-gold/[0.05] blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-[15%] right-[8%] h-[180px] w-[180px] sm:h-[240px] sm:w-[240px] lg:h-[300px] lg:w-[300px] animate-float-2 rounded-full bg-gold/[0.04] blur-[80px] pointer-events-none" />
+        <div className="absolute top-[60%] left-[60%] h-[150px] w-[150px] sm:h-[200px] sm:w-[200px] lg:h-[250px] lg:w-[250px] animate-float-3 rounded-full bg-verdant/[0.03] blur-[70px] pointer-events-none" />
 
         {/* Horizontal light rays */}
         <div className="absolute top-[20%] left-0 right-0 h-px bg-gradient-to-r from-transparent via-gold/[0.1] to-transparent pointer-events-none" />

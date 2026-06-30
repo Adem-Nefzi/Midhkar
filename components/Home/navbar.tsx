@@ -44,7 +44,7 @@ export function Navbar() {
         </svg>
       </div>
 
-      <div className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <div className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-4">
         {/* Logo */}
         <Link
           href="/"
@@ -87,7 +87,7 @@ export function Navbar() {
                 type="button"
                 onClick={() => setLocale(code)}
                 aria-pressed={locale === code}
-                className={`cursor-pointer rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300 ${
+                className={`cursor-pointer rounded-full px-3 py-2 text-xs font-semibold transition-all duration-300 ${
                   locale === code
                     ? "bg-gold text-ink shadow-md shadow-gold/20"
                     : "text-parchment-muted hover:text-parchment hover:bg-gold/5"
@@ -102,7 +102,7 @@ export function Navbar() {
 
           <Link
             href="/create"
-            className="group relative cursor-pointer overflow-hidden rounded-full border-2 border-gold/40 bg-gold/15 px-5 py-2 text-sm font-semibold text-gold transition-all hover:bg-gold/25 hover:border-gold/60 hover:shadow-lg hover:shadow-gold/10"
+            className="group relative cursor-pointer overflow-hidden rounded-full border-2 border-gold/40 bg-gold/15 px-5 py-2.5 text-sm font-semibold text-gold transition-all hover:bg-gold/25 hover:border-gold/60 hover:shadow-lg hover:shadow-gold/10"
           >
             <span className="absolute inset-0 -translate-x-full bg-parchment/20 transition-transform duration-500 group-hover:translate-x-full" />
             <span className="relative">{t("nav.create") as string}</span>

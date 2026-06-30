@@ -37,16 +37,16 @@ export function QuranPreview() {
       <div className="absolute left-1/3 top-1/3 h-[400px] w-[400px] rounded-full bg-verdant/[0.03] blur-[80px]" />
 
       {/* Corner quarter-medallions — brighter and larger */}
-      <div className="absolute -top-12 -left-12 h-[300px] w-[300px] opacity-70">
+      <div className="absolute -top-12 -left-12 h-[150px] w-[150px] sm:h-[200px] sm:w-[200px] lg:h-[300px] lg:w-[300px] opacity-70">
         <QuarterMedallion />
       </div>
-      <div className="absolute -top-12 -right-12 h-[300px] w-[300px] opacity-70 rotate-90">
+      <div className="absolute -top-12 -right-12 h-[150px] w-[150px] sm:h-[200px] sm:w-[200px] lg:h-[300px] lg:w-[300px] opacity-70 rotate-90">
         <QuarterMedallion />
       </div>
-      <div className="absolute -bottom-12 -left-12 h-[300px] w-[300px] opacity-70 -rotate-90">
+      <div className="absolute -bottom-12 -left-12 h-[150px] w-[150px] sm:h-[200px] sm:w-[200px] lg:h-[300px] lg:w-[300px] opacity-70 -rotate-90">
         <QuarterMedallion />
       </div>
-      <div className="absolute -bottom-12 -right-12 h-[300px] w-[300px] opacity-70 rotate-180">
+      <div className="absolute -bottom-12 -right-12 h-[150px] w-[150px] sm:h-[200px] sm:w-[200px] lg:h-[300px] lg:w-[300px] opacity-70 rotate-180">
         <QuarterMedallion />
       </div>
 

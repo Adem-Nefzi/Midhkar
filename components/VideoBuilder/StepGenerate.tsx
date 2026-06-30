@@ -1,6 +1,18 @@
 "use client";
 /**
  * StepGenerate.tsx  —  Step 4: live preview + generation
+ *
+ * Preview fixes:
+ *  - Canvas renders at FULL ENCODE resolution (e.g. 720×1280) then is
+ *    CSS-scaled down to fit the preview box. This means font sizes, padding,
+ *    positions and all proportions are 100% identical to the final video.
+ *  - bgVideoRef is NOT in the useEffect dependency array — the ref value
+ *    is read inside the rAF loop instead, so the loop never restarts due
+ *    to the video element. This eliminates the stutter.
+ *  - The video element is played once on mount and never re-played inside
+ *    the loop, so there's no fight between play() calls.
+ *  - renderFullFrame() from generate-video.ts is used — same code path
+ *    as the encoder, so the preview is pixel-accurate.
  */
 
 import { useEffect, useRef } from "react";
@@ -11,30 +23,46 @@ import {
   DownloadIcon,
   CrescentMoonIcon,
 } from "./icons";
-import { PLATFORMS } from "@/lib/quran";
+import { PLATFORM_META } from "@/lib/types";
+import type { PlatformId } from "@/lib/types";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
-import { GenLog, VideoSettings } from "@/lib/types";
-import { drawAyahFrame, drawBackground } from "@/lib/canva-utils";
+import type { GenLog, VideoSettings } from "@/lib/types";
+import { renderFullFrame } from "@/lib/generate-video";
+
+type PlatformLike = {
+  id: string;
+  label: string;
+  aspect: string;
+  fontSize: string;
+};
+
+/* ── Encode dimensions (must match generate-video.ts) ─────── */
+const ENCODE_DIMS: Record<string, [number, number]> = {
+  "9:16": [720, 1280],
+  "16:9": [1280, 720],
+  "1:1": [1080, 1080],
+};
+
+/* ── Preview display height (canvas is scaled via CSS) ──────── */
+const PREVIEW_H = 480; // px — canvas is always this tall in the UI
 
 interface Props {
   surah: Surah;
   reciter: Reciter;
-  ayahs: Ayah[]; // selected ayahs in order
-  sortedNums: number[]; // sorted selected verse numbers
+  ayahs: Ayah[];
+  sortedNums: number[];
   settings: VideoSettings;
-  platform: (typeof PLATFORMS)[0];
+  platform: PlatformLike;
   bgVideoRef: React.RefObject<HTMLVideoElement | null>;
-  // Preview nav
   previewIdx: number;
   onPreviewIdx: (i: number) => void;
-  // Generation
   isGenerating: boolean;
   genLogs: GenLog[];
   resultVideoUrl: string | null;
   onGenerate: () => void;
   onCancel: () => void;
-  onReset: () => void; // clear result, keep settings
-  onStartOver: () => void; // go back to step 1
+  onReset: () => void;
+  onStartOver: () => void;
   onBack: () => void;
   locale: string;
 }
@@ -61,50 +89,117 @@ export function StepGenerate({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
+  // Keep a stable ref to the current ayah so the rAF loop can read it
+  // without being in the dependency array
+  const ayahRef = useRef<Ayah | null>(null);
+  const settingsRef = useRef<VideoSettings>(settings);
+  const platformRef = useRef<PlatformLike>(platform);
+  const surahRef = useRef<Surah>(surah);
 
-  // Canvas preview dimensions (display size, not encode size)
-  const PREV_DIMS: Record<string, [number, number]> = {
-    "9:16": [320, 568],
-    "16:9": [480, 270],
-    "1:1": [360, 360],
-  };
-  const [pw, ph] = PREV_DIMS[platform.aspect] ?? [320, 568];
+  // Keep refs in sync with props on every render
+  const prevAyahNum = useRef<number | null>(null);
+  const previewStartRef = useRef(Date.now());
+  if (ayahs[previewIdx]?.numberInSurah !== prevAyahNum.current) {
+    prevAyahNum.current = ayahs[previewIdx]?.numberInSurah ?? null;
+    previewStartRef.current = Date.now();
+  }
+  ayahRef.current = ayahs[previewIdx] ?? ayahs[0] ?? null;
+  settingsRef.current = settings;
+  platformRef.current = platform;
+  surahRef.current = surah;
 
-  // Live canvas re-render loop
+  /* ── Full encode dimensions ──────────────────────────────── */
+  const [encW, encH] = ENCODE_DIMS[platform.aspect] ?? [720, 1280];
+  // CSS display size — keep height fixed, width follows aspect ratio
+  const dispH = PREVIEW_H;
+  const dispW = Math.round(PREVIEW_H * (encW / encH));
+
+  /* ── Start background video on mount, never restart ─────── */
+  useEffect(() => {
+    const videoEl = bgVideoRef.current;
+    if (!videoEl) return;
+    const needsVideo =
+      settings.background === "upload" || settings.background === "library";
+    if (needsVideo && videoEl.paused) {
+      videoEl.play().catch(() => {});
+    }
+    // intentionally NOT in deps — we only want to trigger play() once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.background, settings.videoUrl, settings.uploadedVideoUrl]);
+
+  /* ── rAF render loop ─────────────────────────────────────── */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const ayah = ayahs[previewIdx] ?? ayahs[0] ?? null;
+    // Set canvas to FULL encode resolution
+    canvas.width = encW;
+    canvas.height = encH;
+
     let alive = true;
+    let paused = false;
+
+    const onVisibility = () => {
+      paused = document.hidden;
+      if (!paused) {
+        previewStartRef.current = Date.now();
+        animRef.current = requestAnimationFrame(draw);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     const draw = () => {
-      if (!alive) return;
-      drawBackground(
+      if (!alive || paused) return;
+
+      // Read current values from refs — no dependency on them so loop
+      // never restarts due to settings/ayah/platform changes
+      const videoEl = bgVideoRef.current;
+      const s = settingsRef.current;
+      const p = platformRef.current;
+      const ayah = ayahRef.current;
+      const sr = surahRef.current;
+
+      const useVideoBg =
+        (s.background === "upload" || s.background === "library") &&
+        videoEl !== null;
+
+      const animP = s.textAnimation === "none" ? 1 : Math.min(1, (Date.now() - previewStartRef.current) / 500);
+      renderFullFrame(
         ctx,
-        canvas.width,
-        canvas.height,
-        settings.background,
-        bgVideoRef.current,
-        settings.bgOverlay,
+        canvas,
+        ayah,
+        sr,
+        s,
+        p as any,
+        useVideoBg ? videoEl : null,
+        undefined,
+        animP,
       );
-      drawAyahFrame(ctx, canvas, ayah, surah, settings, platform);
+
       animRef.current = requestAnimationFrame(draw);
     };
+
     draw();
 
     return () => {
       alive = false;
+      document.removeEventListener("visibilitychange", onVisibility);
       cancelAnimationFrame(animRef.current);
     };
-  }, [settings, previewIdx, ayahs, surah, platform, bgVideoRef]);
+    // Only restart the loop if the canvas encode dimensions change
+    // (i.e. the user switches platform aspect ratio)
+  }, [encW, encH]);
 
+  /* ── Derived ─────────────────────────────────────────────── */
   const lastLog = genLogs[genLogs.length - 1];
   const progress = lastLog?.pct ?? 0;
   const estDur = sortedNums.length * 6;
   const fileName = `${surah.englishName}_${sortedNums[0]}-${sortedNums[sortedNums.length - 1]}.mp4`;
+  const platformLabel =
+    PLATFORM_META[platform.id as PlatformId]?.label ?? platform.label;
+  const ar = locale === "ar";
 
   return (
     <div className="animate-fade-up max-w-5xl mx-auto">
@@ -112,34 +207,75 @@ export function StepGenerate({
       <div className="text-center mb-8">
         <IslamicDivider className="mb-4" />
         <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
-          {locale === "ar" ? "معاينة وإنتاج" : "Preview & Generate"}
+          {ar ? "معاينة وإنتاج" : "Preview & Generate"}
         </h2>
         <p className="mt-2 text-parchment-muted text-sm">
-          {locale === "ar"
-            ? "معاينة حية — الصوت يُدمج تلقائياً أثناء الإنتاج"
-            : "Live preview — audio is merged automatically during generation"}
+          {ar
+            ? "المعاينة مطابقة تماماً للفيديو النهائي"
+            : "Preview is pixel-accurate — what you see is what you get"}
         </p>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8 items-start justify-center">
-        {/* ── Canvas preview ──────────────────────────────────── */}
+        {/* ── Canvas preview ──────────────────────────────── */}
         <div className="flex flex-col items-center shrink-0">
+          {/* Platform label */}
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-gold/50 font-medium">
+              {platformLabel}
+            </span>
+            <span className="text-[10px] text-parchment-muted/30">·</span>
+            <span className="text-[10px] text-parchment-muted/40">
+              {platform.aspect}
+            </span>
+            <span className="text-[10px] text-parchment-muted/30">·</span>
+            <span className="text-[10px] text-parchment-muted/30">
+              {encW}×{encH}
+            </span>
+          </div>
+
+          {/* Canvas wrapper — CSS scales the full-res canvas down */}
           <div
-            className="relative rounded-sm border-2 border-gold/25 shadow-2xl shadow-gold/5 overflow-hidden"
-            style={{ width: pw, height: ph }}
+            className="relative rounded-sm border-2 border-gold/25 shadow-2xl shadow-gold/5 overflow-hidden max-w-full"
+            style={{ width: dispW, height: dispH }}
           >
             <KuficBorder />
+
+            {/*
+              The canvas is rendered at full encode size (e.g. 720×1280)
+              but CSS-scaled to (dispW × dispH). This means every pixel,
+              font size, and position is identical to the final video.
+            */}
             <canvas
               ref={canvasRef}
-              width={pw}
-              height={ph}
-              style={{ display: "block", width: "100%", height: "100%" }}
+              style={{
+                display: "block",
+                width: dispW,
+                height: dispH,
+                imageRendering: "auto",
+              }}
             />
+
+            {/* LIVE badge */}
+            <div className="absolute top-3 left-3 flex items-center gap-1 rounded-full bg-black/50 backdrop-blur-sm px-2 py-0.5 z-10">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+              <span className="text-[9px] text-white/80 font-medium uppercase tracking-wider">
+                Live
+              </span>
+            </div>
+
             {/* Corner ornaments */}
-            <div className="absolute top-2 left-2 h-5 w-5 border-t-2 border-l-2 border-gold/25 pointer-events-none" />
-            <div className="absolute top-2 right-2 h-5 w-5 border-t-2 border-r-2 border-gold/25 pointer-events-none" />
-            <div className="absolute bottom-2 left-2 h-5 w-5 border-b-2 border-l-2 border-gold/25 pointer-events-none" />
-            <div className="absolute bottom-2 right-2 h-5 w-5 border-b-2 border-r-2 border-gold/25 pointer-events-none" />
+            {[
+              "top-2 left-2 border-t-2 border-l-2",
+              "top-2 right-2 border-t-2 border-r-2",
+              "bottom-2 left-2 border-b-2 border-l-2",
+              "bottom-2 right-2 border-b-2 border-r-2",
+            ].map((cls, i) => (
+              <div
+                key={i}
+                className={`absolute h-5 w-5 border-gold/25 pointer-events-none z-10 ${cls}`}
+              />
+            ))}
           </div>
 
           {/* Ayah switcher */}
@@ -148,12 +284,12 @@ export function StepGenerate({
               <button
                 onClick={() => onPreviewIdx(Math.max(0, previewIdx - 1))}
                 disabled={previewIdx === 0}
-                className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-xs"
+                className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-sm"
               >
                 ‹
               </button>
               <span className="text-xs text-parchment-muted px-2">
-                {locale === "ar"
+                {ar
                   ? `${previewIdx + 1} / ${ayahs.length}`
                   : `Ayah ${previewIdx + 1} / ${ayahs.length}`}
               </span>
@@ -162,46 +298,71 @@ export function StepGenerate({
                   onPreviewIdx(Math.min(ayahs.length - 1, previewIdx + 1))
                 }
                 disabled={previewIdx === ayahs.length - 1}
-                className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-xs"
+                className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-sm"
               >
                 ›
               </button>
             </div>
           )}
+
+          {/* Active effects pills */}
+          <div
+            className="mt-3 flex flex-wrap justify-center gap-1"
+            style={{ maxWidth: dispW }}
+          >
+            {[
+              settings.textGlow && (ar ? "توهج" : "Glow"),
+              settings.textOutline && (ar ? "حدود" : "Outline"),
+              settings.textShadow && (ar ? "ظل" : "Shadow"),
+              settings.textAnimation !== "none" && (ar ? "ظهور تدريجي" : "Fade In"),
+              settings.frameStyle &&
+                settings.frameStyle !== "none" &&
+                (ar ? `إطار` : `Frame: ${settings.frameStyle}`),
+              settings.showWatermark &&
+                settings.watermarkText &&
+                `© ${settings.watermarkText}`,
+            ]
+              .filter(Boolean)
+              .map((label, i) => (
+                <span
+                  key={i}
+                  className="rounded-full bg-gold/10 border border-gold/15 px-2 py-0.5 text-[9px] text-gold/60"
+                >
+                  {label as string}
+                </span>
+              ))}
+          </div>
         </div>
 
-        {/* ── Summary + info ──────────────────────────────────── */}
+        {/* ── Summary card ─────────────────────────────── */}
         <div className="flex-1 space-y-4 min-w-0">
           <div className="rounded-sm border border-gold/15 bg-ink-light/20 p-5 kufic-frame">
             <h3 className="text-xs font-medium text-gold/50 uppercase tracking-wider mb-4">
-              {locale === "ar" ? "ملخص" : "Summary"}
+              {ar ? "ملخص" : "Summary"}
             </h3>
             <div className="space-y-2.5">
-              {[
+              {(
                 [
-                  locale === "ar" ? "السورة" : "Surah",
-                  `${surah.name} (${surah.englishName})`,
-                ],
-                [
-                  locale === "ar" ? "الآيات" : "Verses",
-                  `${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} (${sortedNums.length})`,
-                ],
-                [locale === "ar" ? "القارئ" : "Reciter", reciter.englishName],
-                [
-                  locale === "ar" ? "المنصة" : "Platform",
-                  `${platform.label} · ${platform.aspect}`,
-                ],
-                [
-                  locale === "ar" ? "الجودة" : "Output",
-                  "H.264 MP4 + AAC audio",
-                ],
-                [
-                  locale === "ar" ? "المدة التقريبية" : "Est. Duration",
-                  `~${estDur}s`,
-                ],
-              ].map(([label, value]) => (
+                  [
+                    ar ? "السورة" : "Surah",
+                    `${surah.name} (${surah.englishName})`,
+                  ],
+                  [
+                    ar ? "الآيات" : "Verses",
+                    `${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} (${sortedNums.length})`,
+                  ],
+                  [ar ? "القارئ" : "Reciter", reciter.englishName],
+                  [
+                    ar ? "المنصة" : "Platform",
+                    `${platformLabel} · ${platform.aspect}`,
+                  ],
+                  [ar ? "الدقة" : "Resolution", `${encW}×${encH}`],
+                  [ar ? "الجودة" : "Output", "H.264 MP4 + AAC"],
+                  [ar ? "المدة التقريبية" : "Est. Duration", `~${estDur}s`],
+                ] as [string, string][]
+              ).map(([label, value]) => (
                 <div key={label} className="flex gap-3">
-                  <span className="text-parchment-muted text-xs w-28 shrink-0">
+                  <span className="text-parchment-muted text-xs w-32 shrink-0">
                     {label}:
                   </span>
                   <span className="text-parchment text-xs">{value}</span>
@@ -210,24 +371,31 @@ export function StepGenerate({
             </div>
           </div>
 
-          {/* Encoder status note */}
+          {/* Encoder note */}
           <div className="rounded-sm border border-gold/10 bg-gold/[0.03] p-4 text-xs text-parchment-muted/70 space-y-1.5">
             <div className="flex items-center gap-1.5 text-gold/40 mb-1">
               <IslamicStarIcon className="h-3 w-3" />
               <span className="uppercase tracking-wider font-medium">
-                {locale === "ar" ? "ملاحظة" : "Note"}
+                {ar ? "ملاحظة" : "Note"}
               </span>
             </div>
             <p>
-              {locale === "ar"
-                ? "يستخدم FFmpeg.wasm لدمج الصوت والصورة مباشرةً في المتصفح."
-                : "FFmpeg.wasm merges audio & video directly in your browser. First load downloads the encoder (~10 MB)."}
+              {ar
+                ? "يستخدم WebCodecs API — تشفير بالمعالج الرسومي، بدون تحميل إضافي."
+                : "Native WebCodecs API — GPU-accelerated H.264, no extra downloads."}
             </p>
+            {typeof VideoEncoder === "undefined" && (
+              <p className="text-red-400/80 mt-1">
+                {ar
+                  ? "⚠️ متصفحك لا يدعم WebCodecs. استخدم Chrome أو Edge 94+."
+                  : "⚠️ WebCodecs not supported. Use Chrome or Edge 94+."}
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Action buttons ────────────────────────────────────── */}
+      {/* ── Action buttons ───────────────────────────────── */}
       <div className="mt-10 flex justify-center gap-4 flex-wrap">
         <button
           onClick={onBack}
@@ -235,7 +403,7 @@ export function StepGenerate({
           className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 disabled:opacity-40 transition"
         >
           <IslamicStarIcon className="h-3 w-3 rotate-180" />
-          {locale === "ar" ? "رجوع" : "Back"}
+          {ar ? "رجوع" : "Back"}
         </button>
 
         {!isGenerating ? (
@@ -258,9 +426,7 @@ export function StepGenerate({
                   d="M15 10l4.553-2.069A1 1 0 0121 8.882v6.236a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
                 />
               </svg>
-              {locale === "ar"
-                ? "إنتاج الفيديو مع الصوت"
-                : "Generate Video with Audio"}
+              {ar ? "إنتاج الفيديو مع الصوت" : "Generate Video with Audio"}
             </span>
           </button>
         ) : (
@@ -287,12 +453,12 @@ export function StepGenerate({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            {locale === "ar" ? "إيقاف" : "Cancel"}
+            {ar ? "إيقاف" : "Cancel"}
           </button>
         )}
       </div>
 
-      {/* ── Progress ─────────────────────────────────────────── */}
+      {/* ── Progress ─────────────────────────────────────── */}
       {(isGenerating || (genLogs.length > 0 && !resultVideoUrl)) && (
         <div className="mt-6 max-w-lg mx-auto">
           <div className="h-2 rounded-full bg-gold/10 overflow-hidden mb-3">
@@ -319,7 +485,7 @@ export function StepGenerate({
         </div>
       )}
 
-      {/* ── Result ───────────────────────────────────────────── */}
+      {/* ── Result ───────────────────────────────────────── */}
       {resultVideoUrl && !isGenerating && (
         <div className="mt-10 rounded-sm border-2 border-gold/30 bg-gold/5 p-8 text-center kufic-frame animate-fade-up">
           <div className="flex items-center justify-center gap-3 mb-5">
@@ -339,26 +505,19 @@ export function StepGenerate({
               </svg>
             </div>
           </div>
-
           <h3 className="text-xl font-medium text-parchment mb-1">
-            {locale === "ar"
-              ? "الفيديو جاهز مع الصوت! 🎉"
-              : "Video with Audio Ready! 🎉"}
+            {ar ? "الفيديو جاهز! 🎉" : "Video Ready! 🎉"}
           </h3>
           <p className="text-sm text-parchment-muted mb-6">
-            {locale === "ar"
+            {ar
               ? "تم إنشاء ملف MP4 يحتوي على الصوت والصورة المتزامنة"
               : "Your MP4 file with synchronized audio has been generated"}
           </p>
-
-          {/* Inline playback */}
           <video
             src={resultVideoUrl}
             controls
             className="mx-auto rounded-sm mb-6 border border-gold/20 max-h-72 w-full max-w-md"
           />
-
-          {/* Actions */}
           <div className="flex justify-center gap-3 flex-wrap">
             <a
               href={resultVideoUrl}
@@ -366,21 +525,21 @@ export function StepGenerate({
               className="inline-flex items-center gap-2 rounded-full bg-gold px-6 py-2.5 text-sm font-medium text-ink hover:bg-gold-soft transition"
             >
               <DownloadIcon className="h-4 w-4" />
-              {locale === "ar" ? "تحميل MP4" : "Download MP4"}
+              {ar ? "تحميل MP4" : "Download MP4"}
             </a>
             <button
               onClick={onReset}
               className="inline-flex items-center gap-2 rounded-full border border-gold/30 px-6 py-2.5 text-sm text-gold hover:bg-gold/10 transition"
             >
               <IslamicStarIcon className="h-4 w-4" />
-              {locale === "ar" ? "إنتاج نسخة أخرى" : "Generate Another"}
+              {ar ? "إنتاج نسخة أخرى" : "Generate Another"}
             </button>
             <button
               onClick={onStartOver}
               className="inline-flex items-center gap-2 rounded-full border border-parchment/20 px-6 py-2.5 text-sm text-parchment hover:border-gold/40 hover:text-gold transition"
             >
               <CrescentMoonIcon className="h-4 w-4" />
-              {locale === "ar" ? "بداية جديدة" : "Start Over"}
+              {ar ? "بداية جديدة" : "Start Over"}
             </button>
           </div>
         </div>
