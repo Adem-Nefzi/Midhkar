@@ -44,6 +44,7 @@ export type WorkerInMessage =
         bgBitmaps: ImageBitmap[];
         /** One continuous PCM track for the whole video, mono Float32. */
         fullAudioTrack: ArrayBuffer;
+        transitionStyle: "none" | "fade" | "slide" | "scale";
       };
     }
   | { type: "abort" };
@@ -91,6 +92,7 @@ async function runEncode(payload: StartPayload) {
     ayahFrameBitmaps,
     bgBitmaps,
     fullAudioTrack,
+    transitionStyle,
   } = payload;
 
   post({ type: "progress", msg: "Initialising encoder…", pct: 42 });
@@ -169,6 +171,8 @@ async function runEncode(payload: StartPayload) {
   const totalFrames = segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
   let framesDone = 0;
 
+  const TRANSITION_FRAMES = 15; // 0.5s transition at 30fps
+
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     if (aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -188,7 +192,39 @@ async function runEncode(payload: StartPayload) {
           ch,
         );
       }
+
+      // Calculate transition progress (0 to 1)
+      let tProgress = 1;
+      let isTransitioning = false;
+
+      if (transitionStyle && transitionStyle !== "none") {
+        if (f < TRANSITION_FRAMES) {
+          tProgress = f / TRANSITION_FRAMES;
+          isTransitioning = true;
+        } else if (f > seg.totalFrames - TRANSITION_FRAMES) {
+          tProgress = Math.max(0, (seg.totalFrames - f) / TRANSITION_FRAMES);
+          isTransitioning = true;
+        }
+      }
+
+      ctx.save();
+      if (isTransitioning) {
+        if (transitionStyle === "fade") {
+          ctx.globalAlpha = tProgress;
+        } else if (transitionStyle === "slide") {
+          ctx.globalAlpha = tProgress;
+          const offset = (1 - tProgress) * 40; // slide up 40px
+          ctx.translate(0, offset);
+        } else if (transitionStyle === "scale") {
+          ctx.globalAlpha = tProgress;
+          const scale = 0.95 + tProgress * 0.05; // scale from 95% to 100%
+          ctx.translate(cw / 2, ch / 2);
+          ctx.scale(scale, scale);
+          ctx.translate(-cw / 2, -ch / 2);
+        }
+      }
       ctx.drawImage(overlayBitmap, 0, 0, cw, ch);
+      ctx.restore();
 
       await videoSource.add(timestampS, frameDurationS);
 

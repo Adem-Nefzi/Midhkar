@@ -34,6 +34,7 @@ import {
   ARABIC_FONTS,
   LATIN_FONTS,
   PLATFORM_META,
+  PRESETS,
   VideoSettings,
 } from "@/lib/types";
 import type { PlatformId } from "@/lib/types";
@@ -206,11 +207,17 @@ export function StepSettings({
                         opacity: active ? 1 : 0.5,
                       }}
                     >
-                      {id === "youtube" ? <YoutubeLogo className="h-5 w-5" /> :
-                       id === "instagram" ? <InstagramLogo className="h-5 w-5" /> :
-                       id === "tiktok" ? <TikTokLogo className="h-5 w-5" /> :
-                       id === "facebook" ? <FacebookLogo className="h-5 w-5" /> :
-                       <LandscapeLogo className="h-5 w-5" />}
+                      {id === "youtube" ? (
+                        <YoutubeLogo className="h-5 w-5" />
+                      ) : id === "instagram" ? (
+                        <InstagramLogo className="h-5 w-5" />
+                      ) : id === "tiktok" ? (
+                        <TikTokLogo className="h-5 w-5" />
+                      ) : id === "facebook" ? (
+                        <FacebookLogo className="h-5 w-5" />
+                      ) : (
+                        <LandscapeLogo className="h-5 w-5" />
+                      )}
                     </span>
                   </div>
                   {active && (
@@ -386,6 +393,39 @@ export function StepSettings({
           {/* ── TAB: Video ─────────────────────────────────── */}
           {tab === "video" && (
             <div className="space-y-5 animate-fade-up">
+              {/* Presets */}
+              <Field label={ar ? "ثيمات سريعة" : "Quick Themes"}>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        Object.entries(p.settings).forEach(([k, v]) => {
+                          (onChange as any)(k, v);
+                        });
+                      }}
+                      className="rounded-lg border py-2 px-1.5 text-center transition-all hover:border-gold/30 hover:bg-gold/5"
+                      style={{
+                        borderColor:
+                          settings.bgColor === p.settings.bgColor
+                            ? "rgba(212,175,55,0.4)"
+                            : "rgba(212,175,55,0.1)",
+                        background:
+                          settings.bgColor === p.settings.bgColor
+                            ? "rgba(212,175,55,0.1)"
+                            : "transparent",
+                      }}
+                      title={ar ? p.nameAr : p.nameEn}
+                    >
+                      <span className="text-lg block">{p.emoji}</span>
+                      <span className="text-[9px] text-parchment-muted block leading-tight mt-0.5">
+                        {ar ? p.nameAr : p.nameEn}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
               {/* Background source */}
               <Field label={ar ? "نوع الخلفية" : "Background"}>
                 <div className="grid grid-cols-3 gap-2">
@@ -960,7 +1000,12 @@ export function StepSettings({
                       key={key}
                       onClick={() =>
                         key === "textAnimation"
-                          ? onChange("textAnimation", settings.textAnimation === "fade" ? "none" : "fade")
+                          ? onChange(
+                              "textAnimation",
+                              settings.textAnimation === "fade"
+                                ? "none"
+                                : "fade",
+                            )
                           : toggle(key)
                       }
                       className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
@@ -981,21 +1026,56 @@ export function StepSettings({
                         <p className="text-[10px] text-parchment-muted/40">
                           {key === "textAnimation"
                             ? settings.textAnimation !== "none"
-                              ? ar ? "مفعّل" : "On"
-                              : ar ? "معطّل" : "Off"
+                              ? ar
+                                ? "مفعّل"
+                                : "On"
+                              : ar
+                                ? "معطّل"
+                                : "Off"
                             : settings[key]
-                              ? ar ? "مفعّل" : "On"
-                              : ar ? "معطّل" : "Off"}
+                              ? ar
+                                ? "مفعّل"
+                                : "On"
+                              : ar
+                                ? "معطّل"
+                                : "Off"}
                         </p>
                       </div>
                       <div className="ml-auto">
                         <div
-                          className={`toggle-track${key === "textAnimation" ? settings.textAnimation !== "none" ? " on" : "" : settings[key] ? " on" : ""}`}
+                          className={`toggle-track${key === "textAnimation" ? (settings.textAnimation !== "none" ? " on" : "") : settings[key] ? " on" : ""}`}
                         >
                           <div className="toggle-thumb" />
                         </div>
                       </div>
                     </button>
+                  ))}
+                </div>
+              </Field>
+
+              {/* Transition style */}
+              <Field label={ar ? "انتقال بين الآيات" : "Verse Transition"}>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    {
+                      id: "none" as const,
+                      label: ar ? "بدون" : "None",
+                      icon: "▬",
+                    },
+                    { id: "fade" as const, label: "Fade", icon: "◐" },
+                    { id: "slide" as const, label: "Slide", icon: "⇧" },
+                    { id: "scale" as const, label: "Scale", icon: "⊕" },
+                  ].map((t) => (
+                    <ToggleBtn
+                      key={t.id}
+                      active={settings.transitionStyle === t.id}
+                      onClick={() => onChange("transitionStyle", t.id)}
+                    >
+                      <span className="text-sm">{t.icon}</span>
+                      <span className="block text-[10px] mt-0.5">
+                        {t.label}
+                      </span>
+                    </ToggleBtn>
                   ))}
                 </div>
               </Field>
@@ -1018,12 +1098,12 @@ export function StepSettings({
                       {
                         key: "showSurahName",
                         label: ar ? "شارة السورة" : "Surah Name Badge",
-                        emoji: "🏷",
+                        emoji: "📖",
                       },
                       {
                         key: "showVerseNumber",
                         label: ar ? "رقم الآية" : "Verse Number",
-                        emoji: "#",
+                        emoji: "🔢",
                       },
                     ] as const
                   ).map(({ key, label, emoji }) => (

@@ -48,6 +48,8 @@ export interface VideoSettings {
   bgColor: string;            // hex, e.g. "#0a0a0f"
   bgColorSecondary: string;   // hex for gradient end
   bgGradientAngle: number;    // 0–360 degrees
+  // NEW: Verse transition style
+  transitionStyle: "none" | "fade" | "slide" | "scale";
 }
 
 export interface GenLog {
@@ -87,6 +89,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   bgColor: "#09090f",
   bgColorSecondary: "#1a0e00",
   bgGradientAngle: 135,
+  transitionStyle: "fade",
 };
 
 /* ── Arabic fonts ────────────────────────────────────────────── */
@@ -128,3 +131,167 @@ export const PLATFORM_META = {
 } as const;
 
 export type PlatformId = keyof typeof PLATFORM_META;
+
+/* ── Draft / Resume ───────────────────────────────────────────── */
+
+export interface Draft {
+  step: 1 | 2 | 3 | 4;
+  settings: VideoSettings;
+  surahNumber: number;
+  selectedNums: number[];
+  reciterIdentifier: string | null;
+  reciterSource: string | null;
+  savedAt: number;
+}
+
+export const DRAFT_KEY = "midhkar-draft";
+
+export function saveDraft(draft: Draft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch { /* storage full or unavailable */ }
+}
+
+export function loadDraft(): Draft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Draft;
+    // 24h expiry
+    if (Date.now() - parsed.savedAt > 86400000) {
+      localStorage.removeItem(DRAFT_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearDraft(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch { /* ignore */ }
+}
+
+/* ── Presets ──────────────────────────────────────────────────── */
+
+export interface Preset {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  emoji: string;
+  settings: Partial<VideoSettings>;
+}
+
+export const PRESETS: Preset[] = [
+  {
+    id: "ramadan-night",
+    nameEn: "Ramadan Night",
+    nameAr: "ليلة رمضان",
+    emoji: "🌙",
+    settings: {
+      bgColor: "#0a0015",
+      bgColorSecondary: "#1a0a2e",
+      textColor: "#ffd700",
+      fontFamily: "'Noto Naskh Arabic', serif",
+      bgOverlay: 40,
+      overlayStyle: "radial",
+      frameStyle: "arch",
+      textGlow: true,
+      textShadow: true,
+      textAnimation: "fade",
+    },
+  },
+  {
+    id: "medina-sunrise",
+    nameEn: "Medina Sunrise",
+    nameAr: "شروق المدينة",
+    emoji: "🌅",
+    settings: {
+      bgColor: "#1a0a00",
+      bgColorSecondary: "#3d1c00",
+      textColor: "#f5c542",
+      fontFamily: "'Amiri', serif",
+      bgOverlay: 25,
+      overlayStyle: "linear",
+      frameStyle: "corners",
+      textGlow: true,
+      textShadow: true,
+      textAnimation: "fade",
+    },
+  },
+  {
+    id: "ocean-calm",
+    nameEn: "Ocean Calm",
+    nameAr: "هدوء المحيط",
+    emoji: "🌊",
+    settings: {
+      bgColor: "#000d1a",
+      bgColorSecondary: "#00264d",
+      textColor: "#7ec8e3",
+      fontFamily: "'Scheherazade New', serif",
+      bgOverlay: 30,
+      overlayStyle: "radial",
+      frameStyle: "none",
+      textGlow: false,
+      textShadow: true,
+      textAnimation: "fade",
+    },
+  },
+  {
+    id: "emerald",
+    nameEn: "Emerald Garden",
+    nameAr: "الحديقة الزمردية",
+    emoji: "🌿",
+    settings: {
+      bgColor: "#001a0f",
+      bgColorSecondary: "#00331f",
+      textColor: "#a3d977",
+      fontFamily: "'Lateef', serif",
+      bgOverlay: 35,
+      overlayStyle: "linear",
+      frameStyle: "full",
+      textGlow: false,
+      textShadow: true,
+      textAnimation: "none",
+    },
+  },
+  {
+    id: "royal-gold",
+    nameEn: "Royal Gold",
+    nameAr: "الذهبي الملكي",
+    emoji: "👑",
+    settings: {
+      bgColor: "#0a0500",
+      bgColorSecondary: "#2a1a00",
+      textColor: "#ffd700",
+      fontFamily: "'Noto Naskh Arabic', serif",
+      bgOverlay: 20,
+      overlayStyle: "radial",
+      frameStyle: "full",
+      textGlow: true,
+      textShadow: true,
+      textAnimation: "fade",
+      textOutline: true,
+    },
+  },
+  {
+    id: "desert-sunset",
+    nameEn: "Desert Sunset",
+    nameAr: "غروب الصحراء",
+    emoji: "🏜️",
+    settings: {
+      bgColor: "#1a0a00",
+      bgColorSecondary: "#4a1a00",
+      textColor: "#e8a040",
+      fontFamily: "'Cairo', sans-serif",
+      bgOverlay: 25,
+      overlayStyle: "linear",
+      frameStyle: "corners",
+      textGlow: true,
+      textShadow: true,
+      textAnimation: "fade",
+    },
+  },
+];

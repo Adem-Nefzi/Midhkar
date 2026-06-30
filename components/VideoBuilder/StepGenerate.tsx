@@ -22,7 +22,11 @@ import {
   KuficBorder,
   DownloadIcon,
   CrescentMoonIcon,
+  InstagramLogo,
+  TikTokLogo,
+  FacebookLogo,
 } from "./icons";
+import { TwitterIcon } from "./share-icons";
 import { PLATFORM_META } from "@/lib/types";
 import type { PlatformId } from "@/lib/types";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
@@ -89,6 +93,7 @@ export function StepGenerate({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
+  const genStartRef = useRef<number>(0);
   // Keep a stable ref to the current ayah so the rAF loop can read it
   // without being in the dependency array
   const ayahRef = useRef<Ayah | null>(null);
@@ -126,6 +131,15 @@ export function StepGenerate({
     // intentionally NOT in deps — we only want to trigger play() once
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.background, settings.videoUrl, settings.uploadedVideoUrl]);
+
+  /* ── Track generation start time for ETA ──────────────────── */
+  const prevGeneratingRef = useRef(false);
+  useEffect(() => {
+    if (isGenerating && !prevGeneratingRef.current) {
+      genStartRef.current = Date.now();
+    }
+    prevGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
 
   /* ── rAF render loop ─────────────────────────────────────── */
   useEffect(() => {
@@ -195,6 +209,10 @@ export function StepGenerate({
   /* ── Derived ─────────────────────────────────────────────── */
   const lastLog = genLogs[genLogs.length - 1];
   const progress = lastLog?.pct ?? 0;
+  const elapsedMs = isGenerating ? Date.now() - genStartRef.current : 0;
+  const estRemainingSec = progress > 2
+    ? Math.round((elapsedMs / progress) * (100 - progress) / 1000)
+    : 0;
   const estDur = sortedNums.length * 6;
   const fileName = `${surah.englishName}_${sortedNums[0]}-${sortedNums[sortedNums.length - 1]}.mp4`;
   const platformLabel =
@@ -460,13 +478,43 @@ export function StepGenerate({
 
       {/* ── Progress ─────────────────────────────────────── */}
       {(isGenerating || (genLogs.length > 0 && !resultVideoUrl)) && (
-        <div className="mt-6 max-w-lg mx-auto">
-          <div className="h-2 rounded-full bg-gold/10 overflow-hidden mb-3">
+        <div className="mt-6 max-w-lg mx-auto space-y-3">
+          {/* Progress bar */}
+          <div className="h-2 rounded-full bg-gold/10 overflow-hidden mb-1">
             <div
               className="h-full rounded-full bg-gradient-to-r from-gold/70 to-gold transition-all duration-500"
               style={{ width: `${Math.max(2, progress)}%` }}
             />
           </div>
+
+          {/* ETA */}
+          {estRemainingSec > 0 && (
+            <p className="text-center text-[10px] text-parchment-muted/50">
+              {ar
+                ? `~${estRemainingSec}ث متبقية`
+                : `~${estRemainingSec}s remaining`}
+            </p>
+          )}
+
+          {/* Waveform bars */}
+          <div className="flex items-end justify-center gap-[3px] h-10">
+            {Array.from({ length: 24 }).map((_, i) => {
+              const height = 20 + Math.sin(Date.now() / 300 + i * 0.8) * 10 + Math.sin(Date.now() / 500 + i * 1.3) * 6;
+              return (
+                <div
+                  key={i}
+                  className="w-[3px] rounded-full bg-gold/40 transition-all"
+                  style={{
+                    height: `${Math.max(4, height)}px`,
+                    animation: isGenerating ? `pulse-wave 1.2s ease-in-out infinite` : "none",
+                    animationDelay: `${i * 0.1}s`,
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Log messages */}
           <div className="space-y-1">
             {genLogs.slice(-4).map((log, i, arr) => (
               <p
@@ -518,6 +566,61 @@ export function StepGenerate({
             controls
             className="mx-auto rounded-sm mb-6 border border-gold/20 max-h-72 w-full max-w-md"
           />
+          {/* Share buttons */}
+          <div className="flex justify-center gap-2 mb-3">
+            <span className="text-[10px] text-parchment-muted/40 self-center mr-1 uppercase tracking-wider">
+              {ar ? "مشاركة" : "Share"}
+            </span>
+            <button
+              onClick={() => {
+                const text = ar
+                  ? `شاهد فيديو ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} من midhkar`
+                  : `Check out ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} on midhkar`;
+                navigator.clipboard.writeText(text + " https://midhkar.com");
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-pink-600/20 text-pink-400 hover:bg-pink-600/30 transition"
+              title="Instagram"
+            >
+              <InstagramLogo className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                const text = ar
+                  ? `شاهد فيديو ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} من midhkar`
+                  : `Check out ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} on midhkar`;
+                navigator.clipboard.writeText(text + " https://midhkar.com");
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-800/40 text-parchment hover:bg-gray-800/60 transition"
+              title="TikTok"
+            >
+              <TikTokLogo className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                const text = ar
+                  ? `شاهد فيديو ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} من midhkar`
+                  : `Check out ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} on midhkar`;
+                window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent("https://midhkar.com")}&quote=${encodeURIComponent(text)}`, "_blank");
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition"
+              title="Facebook"
+            >
+              <FacebookLogo className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                const text = ar
+                  ? `شاهد فيديو ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} من midhkar`
+                  : `Check out ${surah.englishName} ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]} on midhkar`;
+                window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text + " https://midhkar.com")}`, "_blank");
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-parchment hover:bg-white/20 transition"
+              title="X"
+            >
+              <TwitterIcon className="h-4 w-4" />
+            </button>
+          </div>
+
           <div className="flex justify-center gap-3 flex-wrap">
             <a
               href={resultVideoUrl}

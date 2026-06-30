@@ -373,7 +373,26 @@ export function renderFullFrame(
     ctx.fillRect(0, 0, w, h);
   }
   drawOverlayStyle(ctx, w, h, settings.overlayStyle, settings.bgOverlay);
-  if (ayah) drawAyahFrame(ctx, canvas, ayah, surah, settings, platform, animProgress);
+  if (ayah) {
+    ctx.save();
+    if (animProgress < 1 && settings.transitionStyle && settings.transitionStyle !== "none") {
+      if (settings.transitionStyle === "fade") {
+        ctx.globalAlpha = animProgress;
+      } else if (settings.transitionStyle === "slide") {
+        ctx.globalAlpha = animProgress;
+        const offset = (1 - animProgress) * 40;
+        ctx.translate(0, offset);
+      } else if (settings.transitionStyle === "scale") {
+        ctx.globalAlpha = animProgress;
+        const scale = 0.95 + animProgress * 0.05;
+        ctx.translate(w / 2, h / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-w / 2, -h / 2);
+      }
+    }
+    drawAyahFrame(ctx, canvas, ayah, surah, settings, platform, 1);
+    ctx.restore();
+  }
   if (settings.showWatermark && settings.watermarkText?.trim()) {
     drawWatermark(ctx, w, h, settings.watermarkText);
   }
@@ -540,6 +559,7 @@ export async function generateVideo(params: {
       ayahFrameBitmaps,
       bgBitmaps,
       fullAudioTrack: fullTrack,
+      transitionStyle: settings.transitionStyle,
       onLog: log,
       signal,
     });
@@ -566,6 +586,7 @@ function runWorkerEncode(opts: {
   ayahFrameBitmaps: ImageBitmap[];
   bgBitmaps: ImageBitmap[];
   fullAudioTrack: Float32Array;
+  transitionStyle: "none" | "fade" | "slide" | "scale";
   onLog: (msg: string, pct: number) => void;
   signal: AbortSignal;
 }): Promise<Blob> {
@@ -614,6 +635,7 @@ function runWorkerEncode(opts: {
         ayahFrameBitmaps: opts.ayahFrameBitmaps,
         bgBitmaps: opts.bgBitmaps,
         fullAudioTrack: opts.fullAudioTrack.buffer as ArrayBuffer,
+        transitionStyle: opts.transitionStyle,
       },
     };
 

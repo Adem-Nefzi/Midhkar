@@ -17,8 +17,11 @@ import {
   GenLog,
   VideoSettings,
   PLATFORM_META,
+  saveDraft,
+  loadDraft,
+  clearDraft,
 } from "@/lib/types";
-import type { PlatformId } from "@/lib/types";
+import type { PlatformId, Draft } from "@/lib/types";
 import { generateVideo } from "@/lib/generate-video";
 import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
 import { StepSurah } from "./StepSurah";
@@ -442,6 +445,62 @@ export function VideoBuilder() {
     };
   }, [selectedReciter, selectedSurah, selectedAyahsData, prefetchAudio, clearAudioCache]);
 
+  /* ── Draft auto-save ──────────────────────────────────────── */
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+
+  useEffect(() => {
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    if (resultVideoUrl) return; // don't save after generation
+    draftTimerRef.current = setTimeout(() => {
+      saveDraft({
+        step,
+        settings,
+        surahNumber: selectedSurah?.number ?? 0,
+        selectedNums: sortedNums,
+        reciterIdentifier: selectedReciter?.identifier ?? null,
+        reciterSource: selectedReciter?.source ?? null,
+        savedAt: Date.now(),
+      });
+      setDraftSaving(true);
+      setTimeout(() => setDraftSaving(false), 2000);
+    }, 500);
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  }, [step, settings, selectedSurah?.number, sortedNums, selectedReciter?.identifier, selectedReciter?.source, resultVideoUrl]);
+
+  /* ── Restore draft on mount (after surahs + reciters loaded) ─ */
+  const [draftRestored, setDraftRestored] = useState(false);
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    if (loadedRef.current) return;
+    if (surahsLoading || recitersLoading || !surahs.length || !reciters.length) return;
+    loadedRef.current = true;
+
+    const draft = loadDraft();
+    if (!draft || !draft.surahNumber) return;
+
+    const sr = surahs.find((s) => s.number === draft.surahNumber);
+    if (!sr) return;
+
+    setSelectedSurah(sr);
+    setSelectedNums(new Set(draft.selectedNums));
+    setSettings(draft.settings);
+    setStep(draft.step);
+
+    if (draft.reciterIdentifier) {
+      const rc = reciters.find(
+        (r) => r.identifier === draft.reciterIdentifier && r.source === draft.reciterSource
+      );
+      if (rc) setSelectedReciter(rc);
+    }
+
+    setDraftRestored(true);
+    setTimeout(() => setDraftRestored(false), 4000);
+  }, [surahsLoading, recitersLoading, surahs, reciters]);
+
   const handleStartOver = useCallback(() => {
     setStep(1);
     setSelectedSurah(null);
@@ -455,6 +514,8 @@ export function VideoBuilder() {
     setResultVideoUrl(null);
     setGenLogs([]);
     stopAudio();
+    clearDraft();
+    loadedRef.current = false;
   }, [stopAudio]);
 
   return (
@@ -517,6 +578,18 @@ export function VideoBuilder() {
               : "Choose a surah and reciter — generate a professional Quran video with full synchronized audio"}
           </p>
         </div>
+
+        {/* Draft indicator */}
+        {(draftSaving || draftRestored) && (
+          <div className="flex justify-center mb-4">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-medium transition-all duration-300 ${draftRestored ? "bg-gold/15 text-gold border border-gold/20" : "bg-parchment/5 text-parchment-muted/60 border border-parchment/10"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${draftRestored ? "bg-gold" : "bg-parchment/40"}`} />
+              {draftRestored
+                ? (locale === "ar" ? "تمت استعادة المسودة" : "Draft restored")
+                : (locale === "ar" ? "جاري الحفظ..." : "Auto-saving...")}
+            </span>
+          </div>
+        )}
 
         <StepIndicator step={step} locale={locale} />
 

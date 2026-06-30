@@ -417,6 +417,10 @@
       opacity: 1;
     }
   }
+  @keyframes pulse-wave {
+    0%, 100% { transform: scaleY(1); opacity: 0.4; }
+    50% { transform: scaleY(1.8); opacity: 0.9; }
+  }
   @keyframes spin-slow {
     from {
       transform: rotate(0deg);
