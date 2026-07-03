@@ -1,12 +1,23 @@
 /**
- * encode.worker.ts
+ * encode.worker.ts  (v2 — in-worker background decode)
  *
- * Runs the entire encode pipeline inside a Web Worker using Mediabunny.
- *
- * Fixed:
- *  - Removed OfflineAudioContext which is main-thread only in some browsers.
- *  - Swapped AudioBufferSource for AudioSampleSource + native WebCodecs AudioData.
- *  - Constructed native AudioData directly in the worker and wrapped it in AudioSample.
+ * Runs the ENTIRE pipeline inside a Web Worker using Mediabunny:
+ *  - Decodes the background video (if any) directly from raw bytes using
+ *    Input + BlobSource + CanvasSink. This replaces the old main-thread
+ *    <video> + seek()-per-frame approach, which was the primary source of
+ *    lag/stuttering (each seek was a full keyframe-seek + decode round
+ *    trip via a DOM event, blocking the main thread for the entire
+ *    duration of capture).
+ *  - CanvasSink also handles resize + aspect-correct cropping (`fit:
+ *    'cover'`) and respects the source video's rotation metadata
+ *    automatically, so we no longer need a manual drawImage-stretch step.
+ *  - Background decode is kicked off *before* the audio encode loop and
+ *    only awaited once we actually need it (right before the video frame
+ *    loop), so the two run concurrently instead of serially.
+ *  - Encoder is configured with `latencyMode` + `hardwareAcceleration`
+ *    hints for throughput (see generate-video.ts's DeviceProfile).
+ *  - If the background video fails to decode for any reason, we fall back
+ *    to a solid color instead of producing a broken/blank video.
  */
 
 /// <reference lib="webworker" />
@@ -16,9 +27,13 @@ import {
   Mp4OutputFormat,
   BufferTarget,
   CanvasSource,
-  AudioSampleSource, // Use AudioSampleSource instead of AudioBufferSource
-  AudioSample,       // Use AudioSample directly
+  AudioSampleSource,
+  AudioSample,
   QUALITY_HIGH,
+  Input,
+  BlobSource,
+  CanvasSink,
+  ALL_FORMATS,
 } from "mediabunny";
 
 /* ── Message protocol ────────────────────────────────────────── */
@@ -41,10 +56,14 @@ export type WorkerInMessage =
         frameDurationS: number;
         segments: WorkerSegment[];
         ayahFrameBitmaps: ImageBitmap[];
-        bgBitmaps: ImageBitmap[];
+        /** Raw bytes of the background video file, or null if no video bg. */
+        bgVideoBytes: ArrayBuffer | null;
+        /** Cap on how many unique background frames to decode (one loop). */
+        maxBgFrames: number;
         /** One continuous PCM track for the whole video, mono Float32. */
         fullAudioTrack: ArrayBuffer;
         transitionStyle: "none" | "fade" | "slide" | "scale";
+        latencyMode: "quality" | "realtime";
       };
     }
   | { type: "abort" };
@@ -78,6 +97,74 @@ function post(m: WorkerOutMessage, transfer: Transferable[] = []) {
 
 type StartPayload = Extract<WorkerInMessage, { type: "start" }>["payload"];
 
+/* ══════════════════════════════════════════════════════════════
+   Background video decode — sequential, hardware-accelerated,
+   NO seeking. This is the replacement for the old main-thread
+   captureBackgroundFrames().
+══════════════════════════════════════════════════════════════ */
+
+const FALLBACK_BG_COLOR = "#0b0b0f";
+
+async function decodeBackgroundFrames(
+  bytes: ArrayBuffer,
+  cw: number,
+  ch: number,
+  fps: number,
+  maxFrames: number,
+  totalOutputFrames: number,
+  onProgress: (done: number, total: number) => void,
+): Promise<ImageBitmap[]> {
+  try {
+    const input = new Input({
+      formats: ALL_FORMATS,
+      source: new BlobSource(new Blob([bytes])),
+    });
+
+    const videoTrack = await input.getPrimaryVideoTrack();
+    if (!videoTrack || !(await videoTrack.canDecode())) {
+      console.warn("[worker] background video track missing or undecodable");
+      return [];
+    }
+
+    const rawDuration = await videoTrack.computeDuration();
+    const safeDuration =
+      rawDuration && isFinite(rawDuration) && rawDuration > 0
+        ? rawDuration
+        : 10;
+    const uniqueFrameCount = Math.max(1, Math.ceil(safeDuration * fps));
+    const count = Math.min(
+      uniqueFrameCount,
+      maxFrames,
+      totalOutputFrames || uniqueFrameCount,
+    );
+
+    // CanvasSink handles resize, aspect-correct cropping (fit: 'cover'),
+    // and rotation-metadata correction for us — no manual scaling needed.
+    const sink = new CanvasSink(videoTrack, {
+      width: cw,
+      height: ch,
+      fit: "cover",
+    });
+    const frames: ImageBitmap[] = [];
+
+    for await (const result of sink.canvases(0, safeDuration)) {
+      if (aborted) break;
+      if (!result) continue;
+      frames.push(await createImageBitmap(result.canvas as OffscreenCanvas));
+      if (frames.length % 15 === 0) onProgress(frames.length, count);
+      if (frames.length >= count) break;
+    }
+
+    return frames;
+  } catch (err) {
+    console.warn(
+      "[worker] background decode failed, falling back to solid color:",
+      err,
+    );
+    return [];
+  }
+}
+
 async function runEncode(payload: StartPayload) {
   const {
     cw,
@@ -90,12 +177,14 @@ async function runEncode(payload: StartPayload) {
     frameDurationS,
     segments,
     ayahFrameBitmaps,
-    bgBitmaps,
+    bgVideoBytes,
+    maxBgFrames,
     fullAudioTrack,
     transitionStyle,
+    latencyMode,
   } = payload;
 
-  post({ type: "progress", msg: "Initialising encoder…", pct: 42 });
+  post({ type: "progress", msg: "Initialising encoder…", pct: 40 });
 
   const output = new Output({
     format: new Mp4OutputFormat(),
@@ -108,10 +197,12 @@ async function runEncode(payload: StartPayload) {
   const videoSource = new CanvasSource(canvas as any, {
     codec: "avc",
     bitrate: videoBitrate || QUALITY_HIGH,
+    latencyMode,
+    hardwareAcceleration: "prefer-hardware",
+    keyFrameInterval: 2,
   });
   output.addVideoTrack(videoSource, { frameRate: fps });
 
-  // Use AudioSampleSource instead of AudioBufferSource to feed raw AudioData packets directly
   const audioSource = new AudioSampleSource({
     codec: "aac",
     bitrate: audioBitrate || QUALITY_HIGH,
@@ -120,12 +211,33 @@ async function runEncode(payload: StartPayload) {
 
   await output.start();
 
+  /* ── Kick off background decode NOW — it runs concurrently
+     with audio encoding below since both are async/hardware-
+     bound and don't block each other on the JS thread. ──────── */
+  const totalFrames = segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
+
+  const bgFramesPromise: Promise<ImageBitmap[]> = bgVideoBytes
+    ? decodeBackgroundFrames(
+        bgVideoBytes,
+        cw,
+        ch,
+        fps,
+        maxBgFrames,
+        totalFrames,
+        (done, total) =>
+          post({
+            type: "progress",
+            msg: `Decoding background… ${done}/${total}`,
+            pct: 40 + Math.round((done / total) * 8), // 40 → 48
+          }),
+      )
+    : Promise.resolve([]);
+
   /* ── Encode audio: build native AudioData chunks directly ──────── */
-  post({ type: "progress", msg: "Encoding audio…", pct: 46 });
+  post({ type: "progress", msg: "Encoding audio…", pct: 48 });
 
   const fullTrack = new Float32Array(fullAudioTrack);
-  
-  // 5-second chunks
+
   const CHUNK_SECONDS = 5;
   const chunkFrames = Math.round(CHUNK_SECONDS * sampleRate);
   const totalChunks = Math.ceil(fullTrack.length / chunkFrames) || 1;
@@ -137,20 +249,16 @@ async function runEncode(payload: StartPayload) {
     const count = Math.min(chunkFrames, fullTrack.length - offset);
     const audioDataSegment = fullTrack.subarray(offset, offset + count);
 
-    // Construct standard WebCodecs AudioData directly in the worker
     const audioData = new AudioData({
       format: "f32-planar",
       sampleRate: sampleRate,
       numberOfFrames: count,
       numberOfChannels: channels,
-      timestamp: Math.round((offset / sampleRate) * 1_000_000), // in microseconds
+      timestamp: Math.round((offset / sampleRate) * 1_000_000),
       data: audioDataSegment,
     });
 
-    // Wrap in Mediabunny's AudioSample and pass to AudioSampleSource
     await audioSource.add(new AudioSample(audioData));
-    
-    // Close native AudioData object to free memory immediately
     audioData.close();
 
     chunkIdx++;
@@ -158,17 +266,27 @@ async function runEncode(payload: StartPayload) {
       post({
         type: "progress",
         msg: `Encoding audio… ${chunkIdx}/${totalChunks}`,
-        pct: 46 + Math.round((chunkIdx / totalChunks) * 6),
+        pct: 48 + Math.round((chunkIdx / totalChunks) * 6), // 48 → 54
       });
     }
   }
 
+  /* ── Now actually wait for background frames (usually already
+     done, since it's been decoding since before the audio loop
+     started). ─────────────────────────────────────────────────── */
+  post({ type: "progress", msg: "Finalising background…", pct: 54 });
+  const bgBitmaps = await bgFramesPromise;
+  if (aborted) {
+    bgBitmaps.forEach((b) => b.close());
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const bgDecodeFailed = !!bgVideoBytes && bgBitmaps.length === 0;
+
   /* ── Encode video frames ──────────────────────────────────── */
-  post({ type: "progress", msg: "Encoding video…", pct: 52 });
+  post({ type: "progress", msg: "Encoding video…", pct: 56 });
 
   let globalFrameIdx = 0;
   let timestampS = 0;
-  const totalFrames = segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
   let framesDone = 0;
 
   const TRANSITION_FRAMES = 15; // 0.5s transition at 30fps
@@ -191,9 +309,13 @@ async function runEncode(payload: StartPayload) {
           cw,
           ch,
         );
+      } else if (bgDecodeFailed) {
+        // Background video failed to decode — fall back to a solid
+        // color rather than shipping a blank/broken video.
+        ctx.fillStyle = FALLBACK_BG_COLOR;
+        ctx.fillRect(0, 0, cw, ch);
       }
 
-      // Calculate transition progress (0 to 1)
       let tProgress = 1;
       let isTransitioning = false;
 
@@ -213,11 +335,11 @@ async function runEncode(payload: StartPayload) {
           ctx.globalAlpha = tProgress;
         } else if (transitionStyle === "slide") {
           ctx.globalAlpha = tProgress;
-          const offset = (1 - tProgress) * 40; // slide up 40px
+          const offset = (1 - tProgress) * 40;
           ctx.translate(0, offset);
         } else if (transitionStyle === "scale") {
           ctx.globalAlpha = tProgress;
-          const scale = 0.95 + tProgress * 0.05; // scale from 95% to 100%
+          const scale = 0.95 + tProgress * 0.05;
           ctx.translate(cw / 2, ch / 2);
           ctx.scale(scale, scale);
           ctx.translate(-cw / 2, -ch / 2);
@@ -233,7 +355,7 @@ async function runEncode(payload: StartPayload) {
       framesDone++;
 
       if (framesDone % 16 === 0 || framesDone === totalFrames) {
-        const pct = 52 + Math.round((framesDone / totalFrames) * 42);
+        const pct = 56 + Math.round((framesDone / totalFrames) * 40); // 56 → 96
         post({
           type: "progress",
           msg: `Encoding frame ${framesDone}/${totalFrames}…`,
@@ -245,16 +367,15 @@ async function runEncode(payload: StartPayload) {
   }
 
   /* ── Finalize ─────────────────────────────────────────────── */
-  post({ type: "progress", msg: "Finalising…", pct: 96 });
+  post({ type: "progress", msg: "Finalising…", pct: 97 });
 
   await output.finalize();
 
   const buffer = (output.target as BufferTarget).buffer;
   if (!buffer) throw new Error("Finalize completed but buffer is empty");
 
-  // Free references
-  ayahFrameBitmaps.forEach(b => b.close());
-  bgBitmaps.forEach(b => b.close());
+  ayahFrameBitmaps.forEach((b) => b.close());
+  bgBitmaps.forEach((b) => b.close());
 
   post({ type: "progress", msg: "Done!", pct: 100 });
   post({ type: "done", buffer }, [buffer]);

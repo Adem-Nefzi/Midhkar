@@ -22,7 +22,11 @@ import {
   clearDraft,
 } from "@/lib/types";
 import type { PlatformId, Draft } from "@/lib/types";
-import { generateVideo } from "@/lib/generate-video";
+import {
+  generateVideo,
+  prefetchAudio,
+  clearAudioCache,
+} from "@/lib/generate-video";
 import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
 import { StepSurah } from "./StepSurah";
 import { StepVerses } from "./StepVerses";
@@ -111,8 +115,12 @@ export function VideoBuilder() {
   const [videos, setVideos] = useState<StorageVideo[]>([]);
   const [videosLoading, setVideosLoading] = useState(false);
 
+  // ← CHANGED: added verseSpacing: 0 and transitionStyle: "none" so the
+  // default experience is seamless back-to-back verses with no fade delays.
   const [settings, setSettings] = useState<VideoSettings>({
     ...DEFAULT_SETTINGS,
+    verseSpacing: 0,
+    transitionStyle: "none",
     translationLang: locale === "ar" ? "ar" : locale === "fr" ? "fr" : "en",
   });
 
@@ -122,12 +130,24 @@ export function VideoBuilder() {
   const objectUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bgVideoRef = useRef<HTMLVideoElement>(null);
+  // Tracks which src we've already told bgVideoRef to load, so the eager
+  // preload effect below doesn't call .load() repeatedly on every render.
+  const loadedBgSrcRef = useRef<string | null>(null);
+  // Tracks the object URL created for a user-uploaded background video so
+  // it can be revoked when replaced or on Start Over — otherwise every
+  // re-upload leaks a blob URL for the life of the tab.
+  const uploadedUrlRef = useRef<string | null>(null);
 
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [previewIdx, setPreviewIdx] = useState(0);
+
+  // Fix: was hardcoded to `null` when passed to StepSettings, so the
+  // (already-built) invalid-file / oversized-file UI in StepSettings
+  // never actually received a message — uploads just silently no-op'd.
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const sortedNums = useMemo(
     () => Array.from(selectedNums).sort((a, b) => a - b),
@@ -251,20 +271,43 @@ export function VideoBuilder() {
   const handleFileUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (
-        !file ||
-        !file.type.startsWith("video/") ||
-        file.size > 150 * 1024 * 1024
-      )
+      // Reset the input so selecting the same file again (e.g. after
+      // fixing something and re-picking) still fires onChange.
+      e.target.value = "";
+      if (!file) return;
+
+      if (!file.type.startsWith("video/")) {
+        setUploadError(
+          locale === "ar"
+            ? "الرجاء اختيار ملف فيديو صالح"
+            : "Please choose a valid video file",
+        );
         return;
+      }
+      if (file.size > 150 * 1024 * 1024) {
+        setUploadError(
+          locale === "ar"
+            ? "الحجم الأقصى للملف 150 ميجابايت"
+            : "Max file size is 150MB",
+        );
+        return;
+      }
+
+      setUploadError(null);
+      const url = URL.createObjectURL(file);
+      if (uploadedUrlRef.current) {
+        URL.revokeObjectURL(uploadedUrlRef.current);
+      }
+      uploadedUrlRef.current = url;
+
       setSettings((s) => ({
         ...s,
         background: "upload",
-        uploadedVideoUrl: URL.createObjectURL(file),
+        uploadedVideoUrl: url,
         uploadedVideoFile: file,
       }));
     },
-    [],
+    [locale],
   );
 
   const handleToggleAudio = useCallback(async () => {
@@ -333,6 +376,39 @@ export function VideoBuilder() {
     stopAudio,
   ]);
 
+  /* ── Eagerly preload the background video as soon as it's chosen ──
+     Previously this src-loading + "wait for readyState>=2" logic lived
+     INSIDE handleGenerate, meaning every click of "Generate" first paid
+     up to ~5s of load/decode latency before generation could even start
+     — even though the worker no longer needs this element at all (it
+     decodes the background from raw bytes itself). Moving it here means
+     it happens in the background the moment the user picks a background
+     video (in Settings, step 3), so by the time they reach Generate and
+     click the button it's virtually always already loaded — and either
+     way, generation itself is never gated on it anymore. This element is
+     now used ONLY for the live preview in StepGenerate. */
+  useEffect(() => {
+    const bgEl = bgVideoRef.current;
+    if (!bgEl) return;
+
+    const needsVideo =
+      settings.background === "upload" || settings.background === "library";
+    if (!needsVideo) return;
+
+    const src =
+      settings.background === "library"
+        ? settings.videoUrl
+        : settings.uploadedVideoUrl;
+    if (!src || loadedBgSrcRef.current === src) return;
+
+    loadedBgSrcRef.current = src;
+    bgEl.src = src;
+    bgEl.muted = true;
+    bgEl.loop = true;
+    bgEl.preload = "auto";
+    bgEl.load();
+  }, [settings.background, settings.videoUrl, settings.uploadedVideoUrl]);
+
   const handleGenerate = useCallback(async () => {
     if (!selectedSurah || !selectedReciter || selectedAyahsData.length === 0)
       return;
@@ -343,41 +419,6 @@ export function VideoBuilder() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    const bgEl = bgVideoRef.current;
-    if (bgEl) {
-      const src =
-        settings.background === "library"
-          ? settings.videoUrl
-          : settings.background === "upload"
-            ? settings.uploadedVideoUrl
-            : null;
-
-      if (src) {
-        // ── KEY FIX: load and wait before handing to encoder ──────
-        bgEl.src = src;
-        bgEl.muted = true;
-        bgEl.loop = true;
-        bgEl.preload = "auto";
-        bgEl.load(); // triggers the browser to start decoding
-
-        // Wait until at least one frame is decoded (readyState >= 2)
-        await new Promise<void>((resolve) => {
-          if (bgEl.readyState >= 2) {
-            resolve();
-            return;
-          }
-          const onReady = () => {
-            bgEl.removeEventListener("canplay", onReady);
-            bgEl.removeEventListener("loadeddata", onReady);
-            resolve();
-          };
-          bgEl.addEventListener("canplay", onReady, { once: true });
-          bgEl.addEventListener("loadeddata", onReady, { once: true });
-          setTimeout(resolve, 5000); // hard fallback — never hang forever
-        });
-      }
-    }
-
     try {
       const blob = await generateVideo({
         ayahs: selectedAyahsData,
@@ -385,12 +426,7 @@ export function VideoBuilder() {
         reciter: selectedReciter,
         settings,
         platform: selectedPlatform,
-        bgVideoEl: bgEl,
-        bgVideoBytes: null,
         onLog: (log) => {
-          // Opt 5: Simple throttle using animation frame / state batching
-          // React state handles batching automatically for modern concurrent UI,
-          // but we cap history to avoid unbounded array growth
           setGenLogs((prev) => [...prev.slice(-4), log]);
         },
         signal: ctrl.signal,
@@ -435,15 +471,16 @@ export function VideoBuilder() {
   }, []);
 
   // Opt 8: Start prefetching audio as soon as reciter + surah + verses are ready
-  const { prefetchAudio, clearAudioCache } = require("@/lib/generate-video");
   useEffect(() => {
     if (selectedReciter && selectedSurah && selectedAyahsData.length > 0) {
-      prefetchAudio(selectedAyahsData, selectedReciter, selectedSurah).catch(console.error);
+      prefetchAudio(selectedAyahsData, selectedReciter, selectedSurah).catch(
+        console.error,
+      );
     }
     return () => {
       clearAudioCache();
     };
-  }, [selectedReciter, selectedSurah, selectedAyahsData, prefetchAudio, clearAudioCache]);
+  }, [selectedReciter, selectedSurah, selectedAyahsData]);
 
   /* ── Draft auto-save ──────────────────────────────────────── */
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -468,7 +505,15 @@ export function VideoBuilder() {
     return () => {
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     };
-  }, [step, settings, selectedSurah?.number, sortedNums, selectedReciter?.identifier, selectedReciter?.source, resultVideoUrl]);
+  }, [
+    step,
+    settings,
+    selectedSurah?.number,
+    sortedNums,
+    selectedReciter?.identifier,
+    selectedReciter?.source,
+    resultVideoUrl,
+  ]);
 
   /* ── Restore draft on mount (after surahs + reciters loaded) ─ */
   const [draftRestored, setDraftRestored] = useState(false);
@@ -476,7 +521,8 @@ export function VideoBuilder() {
 
   useEffect(() => {
     if (loadedRef.current) return;
-    if (surahsLoading || recitersLoading || !surahs.length || !reciters.length) return;
+    if (surahsLoading || recitersLoading || !surahs.length || !reciters.length)
+      return;
     loadedRef.current = true;
 
     const draft = loadDraft();
@@ -487,12 +533,26 @@ export function VideoBuilder() {
 
     setSelectedSurah(sr);
     setSelectedNums(new Set(draft.selectedNums));
-    setSettings(draft.settings);
+
+    // Guard: if the draft's platform no longer exists in PLATFORM_META
+    // (e.g. it changed shape since the draft was saved), clear it so the
+    // "required" prompt in StepSettings correctly reappears instead of
+    // silently falling back while the UI shows nothing selected.
+    const restoredSettings = { ...draft.settings };
+    if (
+      restoredSettings.platform &&
+      !PLATFORM_META[restoredSettings.platform as PlatformId]
+    ) {
+      restoredSettings.platform = "";
+    }
+    setSettings(restoredSettings);
     setStep(draft.step);
 
     if (draft.reciterIdentifier) {
       const rc = reciters.find(
-        (r) => r.identifier === draft.reciterIdentifier && r.source === draft.reciterSource
+        (r) =>
+          r.identifier === draft.reciterIdentifier &&
+          r.source === draft.reciterSource,
       );
       if (rc) setSelectedReciter(rc);
     }
@@ -511,11 +571,17 @@ export function VideoBuilder() {
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     }
+    if (uploadedUrlRef.current) {
+      URL.revokeObjectURL(uploadedUrlRef.current);
+      uploadedUrlRef.current = null;
+    }
+    setUploadError(null);
     setResultVideoUrl(null);
     setGenLogs([]);
     stopAudio();
     clearDraft();
     loadedRef.current = false;
+    loadedBgSrcRef.current = null;
   }, [stopAudio]);
 
   return (
@@ -547,7 +613,9 @@ export function VideoBuilder() {
         </svg>
       </div>
 
-      {/* Hidden video element — loaded and decoded before encoding starts */}
+      {/* Hidden video element — used only for the live preview in
+          StepGenerate now. Preloaded eagerly (see effect above) as soon
+          as a background video is chosen, decoupled from generation. */}
       <video
         ref={bgVideoRef}
         className="hidden"
@@ -582,11 +650,19 @@ export function VideoBuilder() {
         {/* Draft indicator */}
         {(draftSaving || draftRestored) && (
           <div className="flex justify-center mb-4">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-medium transition-all duration-300 ${draftRestored ? "bg-gold/15 text-gold border border-gold/20" : "bg-parchment/5 text-parchment-muted/60 border border-parchment/10"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${draftRestored ? "bg-gold" : "bg-parchment/40"}`} />
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-medium transition-all duration-300 ${draftRestored ? "bg-gold/15 text-gold border border-gold/20" : "bg-parchment/5 text-parchment-muted/60 border border-parchment/10"}`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${draftRestored ? "bg-gold" : "bg-parchment/40"}`}
+              />
               {draftRestored
-                ? (locale === "ar" ? "تمت استعادة المسودة" : "Draft restored")
-                : (locale === "ar" ? "جاري الحفظ..." : "Auto-saving...")}
+                ? locale === "ar"
+                  ? "تمت استعادة المسودة"
+                  : "Draft restored"
+                : locale === "ar"
+                  ? "جاري الحفظ..."
+                  : "Auto-saving..."}
             </span>
           </div>
         )}
@@ -640,7 +716,7 @@ export function VideoBuilder() {
             storageVideos={videos}
             videosLoading={videosLoading}
             onFileUpload={handleFileUpload}
-            uploadError={null}
+            uploadError={uploadError}
             onBack={() => setStep(2)}
             onNext={() => setStep(4)}
             locale={locale}

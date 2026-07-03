@@ -9,9 +9,22 @@
  *    text outline, frame decoration styles, verse spacing, solid/gradient bg,
  *    bg gradient controls, overlay style presets, and more.
  *  - Layout: platform picker full-width → then 3-col grid for the rest.
+ *
+ * This revision:
+ *  - Fix: Quick Theme presets now switch background to "color" so the
+ *    chosen gradient is actually visible, and the active preset is
+ *    highlighted by comparing against current settings (not just bgColor).
+ *  - Fix: "Video" background button now only opens the file picker;
+ *    background is only set to "upload" once a real file lands
+ *    (owned by VideoBuilder's handleFileUpload), so cancelling the
+ *    dialog can no longer strand the preview on a missing video.
+ *  - Fun/UX: 🎲 Surprise Me preset shuffle, ✨ applied/reset toasts,
+ *    ↺ one-click customisation reset, a tiny audio equalizer instead of
+ *    a single pulsing bar, a platform/reciter/theme summary strip, and
+ *    tactile hover/press micro-animations throughout.
  */
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import {
   GeometricRosette,
   CrescentMoonIcon,
@@ -35,9 +48,10 @@ import {
   LATIN_FONTS,
   PLATFORM_META,
   PRESETS,
+  DEFAULT_SETTINGS,
   VideoSettings,
 } from "@/lib/types";
-import type { PlatformId } from "@/lib/types";
+import type { PlatformId, Preset } from "@/lib/types";
 
 /* ── Text colour palette ─────────────────────────────────────── */
 const TEXT_COLORS = [
@@ -79,6 +93,37 @@ const FRAME_STYLES = [
   { id: "full", label: "Full", preview: "□" },
   { id: "arch", label: "Arch", preview: "⌒" },
 ] as const;
+
+/* ── Keys reset by the "↺ Reset" button. Deliberately excludes
+   platform, background source, and any uploaded/library media — those
+   are the user's structural choices, not "look & feel" tweaks. ────── */
+const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
+  "fontFamily",
+  "textColor",
+  "textOpacity",
+  "textPosition",
+  "translationFontFamily",
+  "translationColor",
+  "translationOpacity",
+  "showSurahName",
+  "showVerseNumber",
+  "showTranslation",
+  "textShadow",
+  "bgOverlay",
+  "fontSize",
+  "overlayStyle",
+  "showWatermark",
+  "watermarkText",
+  "textGlow",
+  "textOutline",
+  "frameStyle",
+  "verseSpacing",
+  "textAnimation",
+  "bgColor",
+  "bgColorSecondary",
+  "bgGradientAngle",
+  "transitionStyle",
+];
 
 /* ────────────────────────────────────────────────────────────── */
 
@@ -134,6 +179,58 @@ export function StepSettings({
 
   const ar = locale === "ar";
 
+  /* ── Toast (✨ applied / ↺ reset feedback) ───────────────── */
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  /* ── Which preset (if any) matches the current settings exactly ─ */
+  const activePresetId =
+    PRESETS.find((p) =>
+      Object.entries(p.settings).every(([k, v]) => (settings as any)[k] === v),
+    )?.id ?? null;
+  const activePreset = PRESETS.find((p) => p.id === activePresetId) ?? null;
+  const themeLabel = activePreset
+    ? ar
+      ? activePreset.nameAr
+      : activePreset.nameEn
+    : ar
+      ? "مخصص"
+      : "Custom";
+
+  const applyPreset = useCallback(
+    (p: Preset) => {
+      // Fix: presets never included `background`, so applying one while
+      // on "upload"/"library" changed the gradient invisibly. Force the
+      // Color panel so the result is actually visible.
+      onChange("background", "color");
+      Object.entries(p.settings).forEach(([k, v]) => {
+        (onChange as any)(k, v);
+      });
+      showToast(`✨ ${ar ? p.nameAr : p.nameEn} ${ar ? "مُطبّق" : "applied"}`);
+    },
+    [onChange, ar, showToast],
+  );
+
+  const handleSurpriseMe = useCallback(() => {
+    const pool = PRESETS.filter((p) => p.id !== activePresetId);
+    const choice = (pool.length ? pool : PRESETS)[
+      Math.floor(Math.random() * (pool.length ? pool.length : PRESETS.length))
+    ];
+    applyPreset(choice);
+  }, [activePresetId, applyPreset]);
+
+  const handleResetCustomization = useCallback(() => {
+    RESETTABLE_KEYS.forEach((k) => {
+      (onChange as any)(k, DEFAULT_SETTINGS[k]);
+    });
+    showToast(ar ? "↺ تمت إعادة الضبط" : "↺ Reset to defaults");
+  }, [onChange, ar, showToast]);
+
   return (
     <div className="animate-fade-up max-w-6xl mx-auto space-y-8">
       {/* ══ Header ══════════════════════════════════════════════ */}
@@ -147,6 +244,27 @@ export function StepSettings({
             ? "اختر المنصة أولاً ثم القارئ والتخصيصات"
             : "Choose your platform first, then pick a reciter and customise"}
         </p>
+
+        {/* Fun: live summary strip — instant affirmation of choices so far */}
+        {(platformChosen || selectedReciter) && (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {platformChosen && (
+              <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
+                🎬{" "}
+                {PLATFORM_META[settings.platform as PlatformId]?.label ??
+                  settings.platform}
+              </span>
+            )}
+            {selectedReciter && (
+              <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
+                🎙 {selectedReciter.englishName}
+              </span>
+            )}
+            <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
+              🎨 {themeLabel}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ══ 1. Platform Picker (MANDATORY) ══════════════════════ */}
@@ -186,7 +304,7 @@ export function StepSettings({
               <button
                 key={id}
                 onClick={() => onChange("platform", id)}
-                className={`platform-card${active ? " active" : ""}`}
+                className={`platform-card${active ? " active" : ""} transition-transform duration-200 hover:-translate-y-0.5 active:scale-95`}
               >
                 {/* Aspect ratio silhouette */}
                 <div
@@ -322,7 +440,7 @@ export function StepSettings({
                 <button
                   onClick={onToggleAudio}
                   disabled={audioLoading}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 transition"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 transition active:scale-90"
                 >
                   {audioLoading ? (
                     <Spinner className="h-4 w-4" />
@@ -341,10 +459,23 @@ export function StepSettings({
                           ? "معاينة الصوت"
                           : "Preview audio")}
                   </p>
-                  <div className="mt-1 h-1 rounded-full bg-gold/10 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full bg-gold/40 ${audioPlaying ? "animate-pulse w-full" : "w-0"}`}
-                    />
+                  {/* Fun: tiny equalizer instead of a single pulsing bar */}
+                  <div className="mt-1.5 flex items-end gap-0.5 h-3">
+                    {audioPlaying ? (
+                      [0, 1, 2, 3, 4].map((i) => (
+                        <span
+                          key={i}
+                          className="w-1 rounded-full bg-gold/50 animate-pulse"
+                          style={{
+                            height: `${30 + (i % 3) * 25}%`,
+                            animationDelay: `${i * 120}ms`,
+                            animationDuration: "900ms",
+                          }}
+                        />
+                      ))
+                    ) : (
+                      <div className="h-1 w-full rounded-full bg-gold/10" />
+                    )}
                   </div>
                 </div>
               </div>
@@ -361,19 +492,34 @@ export function StepSettings({
 
         {/* ── Col 2 & 3: Tabbed customisation panel ─────────── */}
         <div className="lg:col-span-2 kufic-frame p-5 rounded-sm space-y-4">
-          <SectionHead
-            icon={<CrescentMoonIcon className="h-4 w-4 text-gold/40" />}
-            step={3}
-            label={ar ? "التخصيص" : "Customise"}
-          />
+          <div className="flex items-center justify-between">
+            <SectionHead
+              icon={<CrescentMoonIcon className="h-4 w-4 text-gold/40" />}
+              step={3}
+              label={ar ? "التخصيص" : "Customise"}
+            />
+            <button
+              onClick={handleResetCustomization}
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-parchment-muted/50 hover:text-gold hover:bg-gold/5 transition active:scale-95"
+              title={
+                ar ? "إعادة تعيين كل التخصيصات" : "Reset all customisation"
+              }
+            >
+              ↺ {ar ? "إعادة تعيين" : "Reset"}
+            </button>
+          </div>
 
           {/* Tabs */}
           <div className="flex gap-1 rounded-lg bg-ink-light/30 p-1">
             {(
               [
-                { id: "video", label: ar ? "الفيديو" : "Video" },
-                { id: "text", label: ar ? "النص" : "Text" },
-                { id: "effects", label: ar ? "التأثيرات" : "Effects" },
+                { id: "video", label: ar ? "الفيديو" : "Video", emoji: "🎬" },
+                { id: "text", label: ar ? "النص" : "Text", emoji: "✍️" },
+                {
+                  id: "effects",
+                  label: ar ? "التأثيرات" : "Effects",
+                  emoji: "🎭",
+                },
               ] as const
             ).map((t) => (
               <button
@@ -385,46 +531,66 @@ export function StepSettings({
                     : "text-parchment-muted hover:text-parchment"
                 }`}
               >
-                {t.label}
+                {t.emoji} {t.label}
               </button>
             ))}
           </div>
+
+          {/* Toast: ✨ applied / ↺ reset feedback */}
+          {toast && (
+            <div className="animate-fade-up rounded-lg border border-gold/25 bg-gold/10 px-3 py-2 text-center text-xs text-gold">
+              {toast}
+            </div>
+          )}
 
           {/* ── TAB: Video ─────────────────────────────────── */}
           {tab === "video" && (
             <div className="space-y-5 animate-fade-up">
               {/* Presets */}
-              <Field label={ar ? "ثيمات سريعة" : "Quick Themes"}>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-parchment-muted uppercase tracking-wider">
+                    {ar ? "ثيمات سريعة" : "Quick Themes"}
+                  </span>
+                  <button
+                    onClick={handleSurpriseMe}
+                    className="inline-flex items-center gap-1 rounded-full border border-gold/15 px-2.5 py-1 text-[10px] text-gold/70 hover:border-gold/35 hover:text-gold hover:-translate-y-0.5 active:scale-95 transition-all"
+                  >
+                    🎲 {ar ? "فاجئني" : "Surprise Me"}
+                  </button>
+                </div>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        Object.entries(p.settings).forEach(([k, v]) => {
-                          (onChange as any)(k, v);
-                        });
-                      }}
-                      className="rounded-lg border py-2 px-1.5 text-center transition-all hover:border-gold/30 hover:bg-gold/5"
-                      style={{
-                        borderColor:
-                          settings.bgColor === p.settings.bgColor
+                  {PRESETS.map((p) => {
+                    const isActive = activePresetId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => applyPreset(p)}
+                        className="relative rounded-lg border py-2 px-1.5 text-center transition-all duration-200 hover:border-gold/30 hover:bg-gold/5 hover:-translate-y-1 hover:shadow-lg hover:shadow-gold/10 active:scale-95"
+                        style={{
+                          borderColor: isActive
                             ? "rgba(212,175,55,0.4)"
                             : "rgba(212,175,55,0.1)",
-                        background:
-                          settings.bgColor === p.settings.bgColor
+                          background: isActive
                             ? "rgba(212,175,55,0.1)"
                             : "transparent",
-                      }}
-                      title={ar ? p.nameAr : p.nameEn}
-                    >
-                      <span className="text-lg block">{p.emoji}</span>
-                      <span className="text-[9px] text-parchment-muted block leading-tight mt-0.5">
-                        {ar ? p.nameAr : p.nameEn}
-                      </span>
-                    </button>
-                  ))}
+                        }}
+                        title={ar ? p.nameAr : p.nameEn}
+                      >
+                        {isActive && (
+                          <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-ink text-[9px] shadow shadow-gold/40">
+                            ✓
+                          </span>
+                        )}
+                        <span className="text-lg block">{p.emoji}</span>
+                        <span className="text-[9px] text-parchment-muted block leading-tight mt-0.5">
+                          {ar ? p.nameAr : p.nameEn}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              </Field>
+              </div>
 
               {/* Background source */}
               <Field label={ar ? "نوع الخلفية" : "Background"}>
@@ -437,10 +603,7 @@ export function StepSettings({
                   </ToggleBtn>
                   <ToggleBtn
                     active={settings.background === "upload"}
-                    onClick={() => {
-                      onChange("background", "upload");
-                      fileRef.current?.click();
-                    }}
+                    onClick={() => fileRef.current?.click()}
                   >
                     📁 {ar ? "فيديو" : "Video"}
                   </ToggleBtn>
@@ -458,6 +621,11 @@ export function StepSettings({
                   className="hidden"
                   onChange={onFileUpload}
                 />
+                <p className="text-[10px] text-parchment-muted/40 mt-1.5">
+                  {ar
+                    ? "MP4 أو MOV حتى 150 ميجابايت"
+                    : "MP4 or MOV, up to 150MB"}
+                </p>
                 {uploadError && (
                   <p className="text-xs text-red-400 mt-1">{uploadError}</p>
                 )}
@@ -485,7 +653,7 @@ export function StepSettings({
                           onChange("bgColor", p.from);
                           onChange("bgColorSecondary", p.to);
                         }}
-                        className={`rounded-md border px-2 py-2 text-[11px] text-center transition-all ${
+                        className={`rounded-md border px-2 py-2 text-[11px] text-center transition-all hover:-translate-y-0.5 active:scale-95 ${
                           settings.bgColor === p.from
                             ? "border-gold/40 text-gold bg-gold/10"
                             : "border-gold/10 text-parchment-muted hover:border-gold/20"
@@ -816,7 +984,7 @@ export function StepSettings({
                     <button
                       key={f.id}
                       onClick={() => onChange("fontFamily", f.family)}
-                      className={`font-card${settings.fontFamily === f.family ? " active" : ""}`}
+                      className={`font-card${settings.fontFamily === f.family ? " active" : ""} transition-transform duration-200 hover:-translate-y-0.5 active:scale-95`}
                     >
                       <p
                         className="text-lg leading-tight text-parchment"
@@ -860,7 +1028,7 @@ export function StepSettings({
                       key={c.id}
                       title={c.label}
                       onClick={() => onChange("textColor", c.value)}
-                      className={`color-swatch${settings.textColor === c.value ? " active" : ""}`}
+                      className={`color-swatch${settings.textColor === c.value ? " active" : ""} transition-transform duration-150 hover:scale-125 active:scale-90`}
                       style={{ backgroundColor: c.value }}
                     />
                   ))}
@@ -909,7 +1077,7 @@ export function StepSettings({
                           onClick={() =>
                             onChange("translationFontFamily", f.family)
                           }
-                          className={`font-card${settings.translationFontFamily === f.family ? " active" : ""}`}
+                          className={`font-card${settings.translationFontFamily === f.family ? " active" : ""} transition-transform duration-200 hover:-translate-y-0.5 active:scale-95`}
                         >
                           <p
                             className="text-sm text-parchment"
@@ -1008,7 +1176,7 @@ export function StepSettings({
                             )
                           : toggle(key)
                       }
-                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:-translate-y-0.5 active:scale-95 ${
                         key === "textAnimation"
                           ? settings.textAnimation !== "none"
                             ? "border-gold/40 bg-gold/10 ring-1 ring-gold/20"
@@ -1147,10 +1315,18 @@ export function StepSettings({
       </div>
 
       {/* ══ Navigation ══════════════════════════════════════════ */}
+      {canProceed && (
+        <p className="text-center text-xs text-gold/50 animate-fade-up">
+          {ar
+            ? "🎉 كل شيء جاهز — لنبدع!"
+            : "🎉 All set — let's create something beautiful!"}
+        </p>
+      )}
+
       <div className="flex justify-center gap-4 flex-wrap">
         <button
           onClick={onBack}
-          className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 transition"
+          className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 transition active:scale-95"
         >
           <IslamicStarIcon className="h-3 w-3 rotate-180" />
           {ar ? "رجوع" : "Back"}
@@ -1159,7 +1335,7 @@ export function StepSettings({
         <button
           onClick={onNext}
           disabled={!canProceed}
-          className="group relative overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all duration-200 flex items-center gap-2"
+          className="group relative overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all duration-200 flex items-center gap-2 active:scale-95"
         >
           <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
           <span className="relative flex items-center gap-2">
@@ -1236,7 +1412,7 @@ function ToggleBtn({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 rounded-lg border py-2.5 px-2 text-xs transition-all text-center ${
+      className={`flex-1 rounded-lg border py-2.5 px-2 text-xs transition-all text-center hover:-translate-y-0.5 active:scale-95 ${
         active
           ? "border-gold/40 bg-gold/15 text-gold ring-1 ring-gold/25 shadow-sm shadow-gold/10"
           : "border-gold/10 text-parchment-muted hover:border-gold/25 hover:bg-ink-light/30"
