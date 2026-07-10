@@ -1,23 +1,29 @@
 /**
- * encode.worker.ts  (v2 — in-worker background decode)
+ * encode.worker.ts  (v3 — synced, gapless verse transitions)
  *
- * Runs the ENTIRE pipeline inside a Web Worker using Mediabunny:
- *  - Decodes the background video (if any) directly from raw bytes using
- *    Input + BlobSource + CanvasSink. This replaces the old main-thread
- *    <video> + seek()-per-frame approach, which was the primary source of
- *    lag/stuttering (each seek was a full keyframe-seek + decode round
- *    trip via a DOM event, blocking the main thread for the entire
- *    duration of capture).
- *  - CanvasSink also handles resize + aspect-correct cropping (`fit:
- *    'cover'`) and respects the source video's rotation metadata
- *    automatically, so we no longer need a manual drawImage-stretch step.
- *  - Background decode is kicked off *before* the audio encode loop and
- *    only awaited once we actually need it (right before the video frame
- *    loop), so the two run concurrently instead of serially.
- *  - Encoder is configured with `latencyMode` + `hardwareAcceleration`
- *    hints for throughput (see generate-video.ts's DeviceProfile).
- *  - If the background video fails to decode for any reason, we fall back
- *    to a solid color instead of producing a broken/blank video.
+ * Two fixes in this revision, both about audio/text sync:
+ *
+ *  1. DRIFT FIX: `totalFrames` per segment used to be computed independently
+ *     via Math.round((totalSec+trailSec)*FPS). Each verse rounds to the
+ *     nearest 1/30s on its own, and these small errors don't cancel — they
+ *     accumulate across the video. `WorkerSegment.totalFrames` is now
+ *     expected to already come from a CUMULATIVE allocation (see
+ *     generate-video.ts) so total drift across the whole video stays at
+ *     most half a frame, instead of growing with verse count.
+ *
+ *  2. TRANSITION FIX: previously each verse faded its OWN text out during
+ *     its last 0.5s and faded its OWN text in during its first 0.5s —
+ *     meaning for a full second around every verse boundary, text was
+ *     dim/transitioning while the recitation kept playing right through
+ *     it. Now it's a true crossfade between the outgoing and incoming
+ *     verse's text (old alpha + new alpha always sum to 1, so there's
+ *     never a dim/blank dip), and the window is placed:
+ *       - inside the silence gap between verses, if `verseSpacing` leaves
+ *         one (so neither verse's spoken audio is ever touched), or
+ *       - split tightly across the exact audio cut point (~270ms total)
+ *         if there's no gap, since that's the only time available.
+ *     `WorkerSegment.trailFrames` (how many of a segment's own frames are
+ *     trailing silence vs speech) is what makes this placement possible.
  */
 
 /// <reference lib="webworker" />
@@ -39,7 +45,15 @@ import {
 /* ── Message protocol ────────────────────────────────────────── */
 
 export interface WorkerSegment {
+  /** Total frames for this verse, INCLUDING its trailing silence (if any).
+   *  Must come from a cumulative (drift-free) allocation — see
+   *  generate-video.ts's segment-building code. */
   totalFrames: number;
+  /** How many of this segment's own trailing frames are silence (from
+   *  `verseSpacing`), as opposed to actual spoken audio. Used to place the
+   *  transition crossfade inside dead time instead of over speech. 0 if
+   *  there's no gap after this verse. */
+  trailFrames: number;
 }
 
 export type WorkerInMessage =
@@ -98,9 +112,8 @@ function post(m: WorkerOutMessage, transfer: Transferable[] = []) {
 type StartPayload = Extract<WorkerInMessage, { type: "start" }>["payload"];
 
 /* ══════════════════════════════════════════════════════════════
-   Background video decode — sequential, hardware-accelerated,
-   NO seeking. This is the replacement for the old main-thread
-   captureBackgroundFrames().
+   Background video decode — unchanged from v2: sequential,
+   hardware-accelerated, no seeking.
 ══════════════════════════════════════════════════════════════ */
 
 const FALLBACK_BG_COLOR = "#0b0b0f";
@@ -138,8 +151,6 @@ async function decodeBackgroundFrames(
       totalOutputFrames || uniqueFrameCount,
     );
 
-    // CanvasSink handles resize, aspect-correct cropping (fit: 'cover'),
-    // and rotation-metadata correction for us — no manual scaling needed.
     const sink = new CanvasSink(videoTrack, {
       width: cw,
       height: ch,
@@ -163,6 +174,48 @@ async function decodeBackgroundFrames(
     );
     return [];
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Transition scheduling
+   ──────────────────────────────────────────────────────────────
+   For each boundary between verse i and verse i+1, decide how many
+   frames come from the END of verse i's segment ("preFrames") and how
+   many from the START of verse i+1's segment ("postFrames") to make up
+   the crossfade window. Preference order:
+     1. If verse i has enough trailing silence, put the WHOLE window
+        there — verse i+1's spoken audio starts exactly when its text
+        has already fully arrived, and verse i's spoken audio is never
+        touched.
+     2. If there's SOME silence, use all of it, then take the remainder
+        from the start of verse i+1.
+     3. If there's none, split evenly across the hard cut.
+══════════════════════════════════════════════════════════════ */
+
+const TRANSITION_WINDOW_FRAMES = 8; // ~270ms @30fps total crossfade length
+const BOOKEND_FADE_FRAMES = 6; // ~200ms fade at the very start/end of the video
+
+interface Boundary {
+  preFrames: number; // taken from the end of the earlier segment
+  postFrames: number; // taken from the start of the later segment
+}
+
+function computeBoundaries(
+  segments: WorkerSegment[],
+  transitionEnabled: boolean,
+): Boundary[] {
+  if (!transitionEnabled) {
+    return segments.slice(0, -1).map(() => ({ preFrames: 0, postFrames: 0 }));
+  }
+  return segments.slice(0, -1).map((seg) => {
+    const trailAvail = Math.max(0, Math.min(seg.trailFrames, seg.totalFrames));
+    const TW = TRANSITION_WINDOW_FRAMES;
+    if (trailAvail >= TW) return { preFrames: TW, postFrames: 0 };
+    if (trailAvail > 0)
+      return { preFrames: trailAvail, postFrames: TW - trailAvail };
+    const preFrames = Math.floor(TW / 2);
+    return { preFrames, postFrames: TW - preFrames };
+  });
 }
 
 async function runEncode(payload: StartPayload) {
@@ -211,9 +264,8 @@ async function runEncode(payload: StartPayload) {
 
   await output.start();
 
-  /* ── Kick off background decode NOW — it runs concurrently
-     with audio encoding below since both are async/hardware-
-     bound and don't block each other on the JS thread. ──────── */
+  /* ── Kick off background decode NOW — runs concurrently with
+     audio encoding below. ─────────────────────────────────────── */
   const totalFrames = segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
 
   const bgFramesPromise: Promise<ImageBitmap[]> = bgVideoBytes
@@ -271,9 +323,7 @@ async function runEncode(payload: StartPayload) {
     }
   }
 
-  /* ── Now actually wait for background frames (usually already
-     done, since it's been decoding since before the audio loop
-     started). ─────────────────────────────────────────────────── */
+  /* ── Wait for background frames (usually already done). ───────── */
   post({ type: "progress", msg: "Finalising background…", pct: 54 });
   const bgBitmaps = await bgFramesPromise;
   if (aborted) {
@@ -285,17 +335,32 @@ async function runEncode(payload: StartPayload) {
   /* ── Encode video frames ──────────────────────────────────── */
   post({ type: "progress", msg: "Encoding video…", pct: 56 });
 
-  let globalFrameIdx = 0;
-  let timestampS = 0;
-  let framesDone = 0;
+  const transitionEnabled = transitionStyle !== "none";
+  const boundaries = computeBoundaries(segments, transitionEnabled);
 
-  const TRANSITION_FRAMES = 15; // 0.5s transition at 30fps
+  let globalFrameIdx = 0;
+  let framesDone = 0;
 
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     if (aborted) throw new DOMException("Aborted", "AbortError");
 
     const seg = segments[segIdx];
-    const overlayBitmap = ayahFrameBitmaps[segIdx];
+    const overlay = ayahFrameBitmaps[segIdx];
+    const nextOverlay =
+      segIdx < segments.length - 1 ? ayahFrameBitmaps[segIdx + 1] : null;
+    const prevOverlay = segIdx > 0 ? ayahFrameBitmaps[segIdx - 1] : null;
+
+    // Boundary INTO this segment (crossfade tail from the previous verse)
+    const inB = segIdx > 0 ? boundaries[segIdx - 1] : null;
+    // Boundary OUT of this segment (crossfade head into the next verse)
+    const outB = segIdx < boundaries.length ? boundaries[segIdx] : null;
+
+    // Clamp so a very short verse can never have both windows overlap the
+    // same frame — outgoing gets computed first, incoming takes what's left.
+    const outgoingPre = outB ? Math.min(outB.preFrames, seg.totalFrames) : 0;
+    const incomingPost = inB
+      ? Math.min(inB.postFrames, Math.max(0, seg.totalFrames - outgoingPre))
+      : 0;
 
     for (let f = 0; f < seg.totalFrames; f++) {
       if (aborted) throw new DOMException("Aborted", "AbortError");
@@ -310,47 +375,80 @@ async function runEncode(payload: StartPayload) {
           ch,
         );
       } else if (bgDecodeFailed) {
-        // Background video failed to decode — fall back to a solid
-        // color rather than shipping a blank/broken video.
         ctx.fillStyle = FALLBACK_BG_COLOR;
         ctx.fillRect(0, 0, cw, ch);
       }
 
-      let tProgress = 1;
-      let isTransitioning = false;
+      // Default: this verse's own text, fully visible, no transform.
+      let oldBitmap: ImageBitmap | null = null;
+      let oldAlpha = 0;
+      let newBitmap: ImageBitmap = overlay;
+      let newAlpha = 1;
+      let newTransformProgress = 1; // 1 = settled; <1 = still animating in
 
-      if (transitionStyle && transitionStyle !== "none") {
-        if (f < TRANSITION_FRAMES) {
-          tProgress = f / TRANSITION_FRAMES;
-          isTransitioning = true;
-        } else if (f > seg.totalFrames - TRANSITION_FRAMES) {
-          tProgress = Math.max(0, (seg.totalFrames - f) / TRANSITION_FRAMES);
-          isTransitioning = true;
-        }
+      if (incomingPost > 0 && f < incomingPost && prevOverlay) {
+        // Still finishing the crossfade FROM the previous verse.
+        const totalW = inB!.preFrames + inB!.postFrames;
+        const k = inB!.preFrames + f;
+        const t = (k + 1) / (totalW + 1); // 0→1 across the whole boundary
+        oldBitmap = prevOverlay;
+        oldAlpha = 1 - t;
+        newBitmap = overlay;
+        newAlpha = t;
+        newTransformProgress = t;
+      } else if (
+        outgoingPre > 0 &&
+        f >= seg.totalFrames - outgoingPre &&
+        nextOverlay
+      ) {
+        // Starting the crossfade TO the next verse.
+        const totalW = outB!.preFrames + outB!.postFrames;
+        const kLocal = f - (seg.totalFrames - outgoingPre);
+        const t = (kLocal + 1) / (totalW + 1);
+        oldBitmap = overlay;
+        oldAlpha = 1 - t;
+        newBitmap = nextOverlay;
+        newAlpha = t;
+        newTransformProgress = t;
+      } else if (transitionEnabled && segIdx === 0 && f < BOOKEND_FADE_FRAMES) {
+        // Whole-video fade-in — bookend polish only, doesn't touch sync.
+        newAlpha = (f + 1) / (BOOKEND_FADE_FRAMES + 1);
+      } else if (
+        transitionEnabled &&
+        segIdx === segments.length - 1 &&
+        f >= seg.totalFrames - BOOKEND_FADE_FRAMES
+      ) {
+        // Whole-video fade-out.
+        const kk = f - (seg.totalFrames - BOOKEND_FADE_FRAMES);
+        newAlpha = 1 - (kk + 1) / (BOOKEND_FADE_FRAMES + 1);
+      }
+
+      if (oldBitmap && oldAlpha > 0) {
+        ctx.save();
+        ctx.globalAlpha = oldAlpha;
+        ctx.drawImage(oldBitmap, 0, 0, cw, ch);
+        ctx.restore();
       }
 
       ctx.save();
-      if (isTransitioning) {
-        if (transitionStyle === "fade") {
-          ctx.globalAlpha = tProgress;
-        } else if (transitionStyle === "slide") {
-          ctx.globalAlpha = tProgress;
-          const offset = (1 - tProgress) * 40;
-          ctx.translate(0, offset);
-        } else if (transitionStyle === "scale") {
-          ctx.globalAlpha = tProgress;
-          const scale = 0.95 + tProgress * 0.05;
-          ctx.translate(cw / 2, ch / 2);
-          ctx.scale(scale, scale);
-          ctx.translate(-cw / 2, -ch / 2);
-        }
+      ctx.globalAlpha = newAlpha;
+      if (transitionStyle === "slide" && newTransformProgress < 1) {
+        const offset = (1 - newTransformProgress) * 40;
+        ctx.translate(0, offset);
+      } else if (transitionStyle === "scale" && newTransformProgress < 1) {
+        const scale = 0.95 + newTransformProgress * 0.05;
+        ctx.translate(cw / 2, ch / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-cw / 2, -ch / 2);
       }
-      ctx.drawImage(overlayBitmap, 0, 0, cw, ch);
+      ctx.drawImage(newBitmap, 0, 0, cw, ch);
       ctx.restore();
 
+      // Timestamp derived directly from frame index (not accumulated via
+      // repeated +=) so there's zero floating-point drift over long videos.
+      const timestampS = globalFrameIdx * frameDurationS;
       await videoSource.add(timestampS, frameDurationS);
 
-      timestampS += frameDurationS;
       globalFrameIdx++;
       framesDone++;
 

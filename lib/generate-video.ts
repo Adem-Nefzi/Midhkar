@@ -1,21 +1,19 @@
 "use client";
 /**
- * generate-video.ts  —  Mediabunny + Worker edition (v7, decode-based bg capture)
+ * generate-video.ts  —  Mediabunny + Worker edition (v8, synced verse transitions)
  *
- * Key change from v6:
- *  - REMOVED the seek-based `captureBackgroundFrames` (main-thread `<video>`
- *    + fastSeek + 'seeked' event + 500ms fallback per frame). That was the
- *    single biggest source of lag/stutter — each frame was a full
- *    seek-to-keyframe round trip blocking the main thread.
- *  - Background video is now decoded SEQUENTIALLY inside the Worker using
- *    mediabunny's own decoder (Input + BlobSource + CanvasSink), which uses
- *    hardware-accelerated WebCodecs decode with no seeking. The main thread
- *    only has to fetch the raw bytes (fast, parallel with audio fetch).
- *  - Added a device-adaptive quality profile: on detected low-power mobile,
- *    resolution and bitrate are scaled down and the encoder is hinted for
- *    speed (latencyMode: 'realtime', hardwareAcceleration: 'prefer-hardware').
- *  - The hidden <video> element is no longer needed for generation at all
- *    (only keep it in VideoBuilder if you still want it for live preview).
+ * Change from v7 (see encode.worker.ts v3 header for the full explanation):
+ *  - Segment frame counts are now built via CUMULATIVE allocation instead of
+ *    each verse rounding (totalSec+trailSec)*FPS independently. Independent
+ *    per-verse rounding (up to ±16ms each) doesn't cancel out — it
+ *    accumulates over the whole video, so a long surah could drift the
+ *    video visibly out of sync with the audio by the last few verses.
+ *    Cumulative allocation keeps total drift under half a frame, always,
+ *    regardless of verse count.
+ *  - Each segment now also carries `trailFrames` (how many of its own
+ *    frames are trailing silence from `verseSpacing`, vs actual speech),
+ *    which the worker uses to place verse-to-verse transitions inside
+ *    silence gaps when one exists, instead of over spoken audio.
  */
 
 import {
@@ -47,7 +45,7 @@ export { isWebCodecsSupported };
 /* ── Constants ───────────────────────────────────────────────── */
 
 const FPS = 30;
-const LEAD_IN_SEC = 0; // ← CHANGED: was 0.35. No pre-roll silence.
+const LEAD_IN_SEC = 0; // No pre-roll silence — text/audio start together.
 const FALLBACK_DUR = 6;
 const MAX_BG_FRAMES = 900;
 const AUDIO_CONCURRENCY = 6;
@@ -59,19 +57,12 @@ const ASPECT: Record<string, [number, number]> = {
 };
 
 /* ══════════════════════════════════════════════════════════════
-   Device-adaptive quality profile
-   ──────────────────────────────────────────────────────────────
-   Mobile hardware encoders/decoders are usually fine, but on
-   mid/low-tier phones (fewer cores, less RAM) both decode and
-   encode throughput drop sharply. Rather than use one-size-fits
-   -all settings, scale resolution/bitrate down a bit on detected
-   low-power devices, and always bias the encoder toward speed
-   (`realtime` latency mode) since we're not streaming live.
+   Device-adaptive quality profile (unchanged from v7)
 ══════════════════════════════════════════════════════════════ */
 
 export interface DeviceProfile {
   isLowPower: boolean;
-  bitrateScale: number; // applied to base bitrate — safe, doesn't affect layout
+  bitrateScale: number;
   latencyMode: "quality" | "realtime";
 }
 
@@ -82,7 +73,7 @@ export function getDeviceProfile(): DeviceProfile {
   const ua = navigator.userAgent || "";
   const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
   const cores = navigator.hardwareConcurrency || 4;
-  const mem = (navigator as any).deviceMemory as number | undefined; // Chrome/Android only
+  const mem = (navigator as any).deviceMemory as number | undefined;
 
   const isLowPower =
     isMobileUA && (cores <= 6 || (mem !== undefined && mem <= 4));
@@ -90,24 +81,10 @@ export function getDeviceProfile(): DeviceProfile {
   return {
     isLowPower,
     bitrateScale: isLowPower ? 0.7 : 1,
-    // 'realtime' trims encoder lookahead/complexity for throughput. At these
-    // bitrates the visual difference vs 'quality' is minor; the speed gain
-    // is not. Flip to 'quality' if you want max fidelity and don't mind it
-    // being a bit slower.
     latencyMode: "realtime",
   };
 }
 
-// NOTE: resolution is intentionally NEVER scaled by device profile. Unlike
-// bitrate, resolution is part of the pixel-accurate preview contract in
-// StepGenerate.tsx (canvas renders at the exact ENCODE_DIMS and is only
-// CSS-scaled for display) — and drawAyahFrame() in canva-utils.ts uses
-// fixed pixel font sizes that are NOT proportional to canvas size, only
-// padding is. Scaling resolution down would silently change text-to-frame
-// proportions on low-power devices and break WYSIWYG. If you ever want a
-// lower-res "fast preview" tier, it needs to be an explicit user-facing
-// toggle (with StepGenerate.tsx's ENCODE_DIMS updated to match), not an
-// automatic device-based decision.
 function getOutputResolution(
   platform: (typeof PLATFORMS)[0],
 ): [number, number] {
@@ -128,7 +105,7 @@ function getVideoBitrate(
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Concurrent-limited parallel map (unchanged from v6)
+   Concurrent-limited parallel map (unchanged)
 ══════════════════════════════════════════════════════════════ */
 
 async function parallelMap<T, R>(
@@ -153,7 +130,7 @@ async function parallelMap<T, R>(
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Audio prefetch cache (unchanged from v6)
+   Audio prefetch cache (unchanged)
 ══════════════════════════════════════════════════════════════ */
 
 const _audioCache = new Map<string, Float32Array>();
@@ -195,7 +172,7 @@ export function clearAudioCache(): void {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Wake Lock (unchanged from v6)
+   Wake Lock (unchanged)
 ══════════════════════════════════════════════════════════════ */
 
 let _wakeLock: WakeLockSentinel | null = null;
@@ -216,11 +193,7 @@ function releaseWakeLock(): void {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Background video: fetch raw bytes only (main thread)
-   ──────────────────────────────────────────────────────────────
-   No decoding, no seeking, no <video> element here at all — the
-   Worker decodes these bytes itself with mediabunny's CanvasSink.
-   This is fast: it's a File read or a single fetch().
+   Background video: fetch raw bytes only (main thread) — unchanged
 ══════════════════════════════════════════════════════════════ */
 
 async function getBackgroundBytes(
@@ -244,9 +217,7 @@ async function getBackgroundBytes(
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Text-overlay pre-rendering — unchanged from v6 (cheap: one
-   canvas per ayah, not per frame, so this was never the
-   bottleneck).
+   Text-overlay pre-rendering (unchanged)
 ══════════════════════════════════════════════════════════════ */
 
 async function renderAyahOverlays(
@@ -343,9 +314,7 @@ function drawWatermark(
 }
 
 /* ══════════════════════════════════════════════════════════════
-   renderFullFrame — kept for the live preview in StepGenerate.
-   Unchanged: still draws directly from the <video> element for
-   preview purposes only (not used during final generation).
+   renderFullFrame — kept for the live preview in StepGenerate (unchanged)
 ══════════════════════════════════════════════════════════════ */
 
 export function renderFullFrame(
@@ -454,11 +423,36 @@ interface PreparedAyah {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Drift-free segment (frame count) allocation
+   ──────────────────────────────────────────────────────────────
+   Rounding (totalSec+trailSec)*FPS independently PER VERSE is what
+   caused long-surah drift: each verse's rounding error (up to ±16ms)
+   just adds onto the next verse's, with nothing to cancel it out.
+   Instead, track cumulative time and derive each segment's frame count
+   as the DIFFERENCE between consecutive cumulative frame counts. This
+   is the standard "frame accumulator" technique — the sum of all
+   segments' frames always equals round(totalDuration*FPS) exactly, so
+   drift never exceeds half a frame no matter how many verses there are.
+══════════════════════════════════════════════════════════════ */
+
+function buildSegments(prepared: PreparedAyah[]): WorkerSegment[] {
+  let cumSec = 0;
+  let cumFrames = 0;
+  return prepared.map((p) => {
+    cumSec += p.totalSec + p.trailSec;
+    const newCumFrames = Math.round(cumSec * FPS);
+    const totalFrames = Math.max(1, newCumFrames - cumFrames);
+    cumFrames = newCumFrames;
+    // trailFrames only needs to be approximately right (it just tells the
+    // worker how much silence is available to hide a transition in), so a
+    // simple non-cumulative rounding here is fine.
+    const trailFrames = Math.min(totalFrames, Math.round(p.trailSec * FPS));
+    return { totalFrames, trailFrames };
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
    Main export — orchestrates prep, then delegates to the worker.
-   NOTE: signature changed from v6 — no more bgVideoEl/bgVideoBytes
-   params. The function derives background bytes itself from
-   `settings` (uploadedVideoFile / videoUrl) and decodes them
-   inside the Worker. See VideoBuilder.tsx patch notes.
 ══════════════════════════════════════════════════════════════ */
 
 export async function generateVideo(params: {
@@ -484,8 +478,7 @@ export async function generateVideo(params: {
 
   try {
     /* ── 1a. Kick off background bytes fetch immediately — runs
-       concurrently with audio download/decode below (Opt: these
-       are fully independent, no reason to serialize them). ──── */
+       concurrently with audio download/decode below. ──────────── */
     const bgBytesPromise: Promise<ArrayBuffer | null> = needsBgVideo
       ? getBackgroundBytes(settings, signal)
       : Promise.resolve(null);
@@ -518,8 +511,6 @@ export async function generateVideo(params: {
           `Audio ${ayah.numberInSurah} (${i + 1}/${ayahs.length})`,
           5 + Math.round(((i + 1) / ayahs.length) * 20),
         );
-        // ← CHANGED: removed LEAD_IN_SEC from per-verse duration.
-        // Each verse is exactly as long as its audio. No padding.
         return { ayah, samples, totalSec: durSec, trailSec: verseSpacing };
       },
       AUDIO_CONCURRENCY,
@@ -540,8 +531,6 @@ export async function generateVideo(params: {
 
     {
       let offset = 0;
-      // ← CHANGED: removed the lead-in offset entirely. Audio now starts
-      // immediately at t=0 and verses are concatenated back-to-back.
       for (const p of prepared) {
         const safeOffset = Math.min(offset, totalSamples);
         const maxWritable = totalSamples - safeOffset;
@@ -572,19 +561,16 @@ export async function generateVideo(params: {
 
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-    /* ── 4. Wait for background bytes (was already downloading
-       in parallel since step 1a — usually already resolved). ── */
+    /* ── 4. Wait for background bytes (already downloading since
+       step 1a — usually already resolved). ─────────────────────── */
     log("Preparing background…", 40);
     const bgVideoBytes = await bgBytesPromise;
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-    /* ── 5. Hand everything off to the Worker: it decodes the
-       background video AND encodes, all off the main thread. ── */
+    /* ── 5. Hand everything off to the Worker. ─────────────────── */
     log("Starting encoder (background thread)…", 42);
 
-    const segments: WorkerSegment[] = prepared.map((p) => ({
-      totalFrames: Math.round((p.totalSec + p.trailSec) * FPS),
-    }));
+    const segments: WorkerSegment[] = buildSegments(prepared);
 
     const blob = await runWorkerEncode({
       cw,
