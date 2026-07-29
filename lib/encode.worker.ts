@@ -62,12 +62,12 @@ export type WorkerInMessage =
       payload: {
         cw: number;
         ch: number;
-        fps: number;
+        renderFps: number;   // Unique frames rendered per second (30)
+        outputFps: number;   // Encoded output FPS (60 or 30)
         videoBitrate: number;
         audioBitrate: number;
         sampleRate: number;
         channels: number;
-        frameDurationS: number;
         segments: WorkerSegment[];
         ayahFrameBitmaps: ImageBitmap[];
         /** Raw bytes of the background video file, or null if no video bg. */
@@ -122,7 +122,7 @@ async function decodeBackgroundFrames(
   bytes: ArrayBuffer,
   cw: number,
   ch: number,
-  fps: number,
+  renderFps: number,
   maxFrames: number,
   totalOutputFrames: number,
   onProgress: (done: number, total: number) => void,
@@ -144,7 +144,7 @@ async function decodeBackgroundFrames(
       rawDuration && isFinite(rawDuration) && rawDuration > 0
         ? rawDuration
         : 10;
-    const uniqueFrameCount = Math.max(1, Math.ceil(safeDuration * fps));
+    const uniqueFrameCount = Math.max(1, Math.ceil(safeDuration * renderFps));
     const count = Math.min(
       uniqueFrameCount,
       maxFrames,
@@ -161,7 +161,7 @@ async function decodeBackgroundFrames(
     for await (const result of sink.canvases(0, safeDuration)) {
       if (aborted) break;
       if (!result) continue;
-      frames.push(await createImageBitmap(result.canvas as OffscreenCanvas));
+      frames.push(await createImageBitmap(result.canvas as OffscreenCanvas, { premultiplyAlpha: "premultiply" }));
       if (frames.length % 15 === 0) onProgress(frames.length, count);
       if (frames.length >= count) break;
     }
@@ -222,12 +222,12 @@ async function runEncode(payload: StartPayload) {
   const {
     cw,
     ch,
-    fps,
+    renderFps,
+    outputFps,
     videoBitrate,
     audioBitrate,
     sampleRate,
     channels,
-    frameDurationS,
     segments,
     ayahFrameBitmaps,
     bgVideoBytes,
@@ -236,6 +236,9 @@ async function runEncode(payload: StartPayload) {
     transitionStyle,
     latencyMode,
   } = payload;
+
+  const frameDurationS = 1 / outputFps;
+  const frameDouble = Math.round(outputFps / renderFps); // 2 for 60fps output, 1 for 30fps
 
   post({ type: "progress", msg: "Initialising encoder…", pct: 40 });
 
@@ -254,7 +257,7 @@ async function runEncode(payload: StartPayload) {
     hardwareAcceleration: "prefer-hardware",
     keyFrameInterval: 2,
   });
-  output.addVideoTrack(videoSource, { frameRate: fps });
+  output.addVideoTrack(videoSource, { frameRate: outputFps });
 
   const audioSource = new AudioSampleSource({
     codec: "aac",
@@ -273,14 +276,14 @@ async function runEncode(payload: StartPayload) {
         bgVideoBytes,
         cw,
         ch,
-        fps,
+        renderFps,
         maxBgFrames,
         totalFrames,
         (done, total) =>
           post({
             type: "progress",
             msg: `Decoding background… ${done}/${total}`,
-            pct: 40 + Math.round((done / total) * 8), // 40 → 48
+            pct: 40 + Math.round((done / total) * 8),
           }),
       )
     : Promise.resolve([]);
@@ -314,7 +317,7 @@ async function runEncode(payload: StartPayload) {
     audioData.close();
 
     chunkIdx++;
-    if (chunkIdx % 4 === 0 || chunkIdx === totalChunks) {
+    if (chunkIdx % 8 === 0 || chunkIdx === totalChunks) {
       post({
         type: "progress",
         msg: `Encoding audio… ${chunkIdx}/${totalChunks}`,
@@ -338,8 +341,14 @@ async function runEncode(payload: StartPayload) {
   const transitionEnabled = transitionStyle !== "none";
   const boundaries = computeBoundaries(segments, transitionEnabled);
 
-  let globalFrameIdx = 0;
-  let framesDone = 0;
+  // totalFrames is the number of UNIQUE frames to render (at renderFps).
+  // Each is added `frameDouble` times to the encoder for outputFps output.
+  const totalRenderFrames =
+    segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
+  const totalOutputFrames = totalRenderFrames * frameDouble;
+
+  let globalRenderIdx = 0; // counts unique rendered frames
+  let outputFrameIdx = 0;  // counts encoded (output) frames
 
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     if (aborted) throw new DOMException("Aborted", "AbortError");
@@ -355,8 +364,6 @@ async function runEncode(payload: StartPayload) {
     // Boundary OUT of this segment (crossfade head into the next verse)
     const outB = segIdx < boundaries.length ? boundaries[segIdx] : null;
 
-    // Clamp so a very short verse can never have both windows overlap the
-    // same frame — outgoing gets computed first, incoming takes what's left.
     const outgoingPre = outB ? Math.min(outB.preFrames, seg.totalFrames) : 0;
     const incomingPost = inB
       ? Math.min(inB.postFrames, Math.max(0, seg.totalFrames - outgoingPre))
@@ -365,10 +372,11 @@ async function runEncode(payload: StartPayload) {
     for (let f = 0; f < seg.totalFrames; f++) {
       if (aborted) throw new DOMException("Aborted", "AbortError");
 
+      // ── Render unique frame content (once per renderFps frame) ───
       ctx.clearRect(0, 0, cw, ch);
       if (bgBitmaps.length > 0) {
         ctx.drawImage(
-          bgBitmaps[globalFrameIdx % bgBitmaps.length],
+          bgBitmaps[globalRenderIdx % bgBitmaps.length],
           0,
           0,
           cw,
@@ -379,18 +387,16 @@ async function runEncode(payload: StartPayload) {
         ctx.fillRect(0, 0, cw, ch);
       }
 
-      // Default: this verse's own text, fully visible, no transform.
       let oldBitmap: ImageBitmap | null = null;
       let oldAlpha = 0;
       let newBitmap: ImageBitmap = overlay;
       let newAlpha = 1;
-      let newTransformProgress = 1; // 1 = settled; <1 = still animating in
+      let newTransformProgress = 1;
 
       if (incomingPost > 0 && f < incomingPost && prevOverlay) {
-        // Still finishing the crossfade FROM the previous verse.
         const totalW = inB!.preFrames + inB!.postFrames;
         const k = inB!.preFrames + f;
-        const t = (k + 1) / (totalW + 1); // 0→1 across the whole boundary
+        const t = (k + 1) / (totalW + 1);
         oldBitmap = prevOverlay;
         oldAlpha = 1 - t;
         newBitmap = overlay;
@@ -401,7 +407,6 @@ async function runEncode(payload: StartPayload) {
         f >= seg.totalFrames - outgoingPre &&
         nextOverlay
       ) {
-        // Starting the crossfade TO the next verse.
         const totalW = outB!.preFrames + outB!.postFrames;
         const kLocal = f - (seg.totalFrames - outgoingPre);
         const t = (kLocal + 1) / (totalW + 1);
@@ -411,14 +416,12 @@ async function runEncode(payload: StartPayload) {
         newAlpha = t;
         newTransformProgress = t;
       } else if (transitionEnabled && segIdx === 0 && f < BOOKEND_FADE_FRAMES) {
-        // Whole-video fade-in — bookend polish only, doesn't touch sync.
         newAlpha = (f + 1) / (BOOKEND_FADE_FRAMES + 1);
       } else if (
         transitionEnabled &&
         segIdx === segments.length - 1 &&
         f >= seg.totalFrames - BOOKEND_FADE_FRAMES
       ) {
-        // Whole-video fade-out.
         const kk = f - (seg.totalFrames - BOOKEND_FADE_FRAMES);
         newAlpha = 1 - (kk + 1) / (BOOKEND_FADE_FRAMES + 1);
       }
@@ -444,19 +447,22 @@ async function runEncode(payload: StartPayload) {
       ctx.drawImage(newBitmap, 0, 0, cw, ch);
       ctx.restore();
 
-      // Timestamp derived directly from frame index (not accumulated via
-      // repeated +=) so there's zero floating-point drift over long videos.
-      const timestampS = globalFrameIdx * frameDurationS;
-      await videoSource.add(timestampS, frameDurationS);
+      // ── Submit to encoder: frameDouble times for outputFps ─────
+      // H.264 P-frames make duplicate submissions nearly free (tiny
+      // inter-frame reference, almost zero data).
+      for (let d = 0; d < frameDouble; d++) {
+        const timestampS = outputFrameIdx * frameDurationS;
+        await videoSource.add(timestampS, frameDurationS);
+        outputFrameIdx++;
+      }
 
-      globalFrameIdx++;
-      framesDone++;
+      globalRenderIdx++;
 
-      if (framesDone % 16 === 0 || framesDone === totalFrames) {
-        const pct = 56 + Math.round((framesDone / totalFrames) * 40); // 56 → 96
+      if (outputFrameIdx % 60 === 0 || outputFrameIdx >= totalOutputFrames) {
+        const pct = 56 + Math.round((outputFrameIdx / totalOutputFrames) * 40);
         post({
           type: "progress",
-          msg: `Encoding frame ${framesDone}/${totalFrames}…`,
+          msg: `Encoding frame ${outputFrameIdx}/${totalOutputFrames}…`,
           pct,
         });
         await new Promise((r) => setTimeout(r, 0));

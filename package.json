@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@quranjs/api": "^3.4.0",
     "@supabase/supabase-js": "^2.108.2",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",

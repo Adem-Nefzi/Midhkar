@@ -44,7 +44,8 @@ import { PLATFORM_META } from "@/lib/types";
 import type { PlatformId } from "@/lib/types";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { GenLog, VideoSettings } from "@/lib/types";
-import { renderFullFrame } from "@/lib/generate-video";
+import { renderFullFrame, getDeviceProfile } from "@/lib/generate-video";
+import { ensureFontsReady } from "@/lib/fonts-ready";
 
 type PlatformLike = {
   id: string;
@@ -53,10 +54,10 @@ type PlatformLike = {
   fontSize: string;
 };
 
-/* ── Encode dimensions (must match generate-video.ts) ─────── */
+/* ── Encode dimensions — always 1080p ─────────────────────── */
 const ENCODE_DIMS: Record<string, [number, number]> = {
-  "9:16": [720, 1280],
-  "16:9": [1280, 720],
+  "9:16": [1080, 1920],
+  "16:9": [1920, 1080],
   "1:1": [1080, 1080],
 };
 
@@ -359,8 +360,11 @@ export function StepGenerate({
   platformRef.current = platform;
   surahRef.current = surah;
 
-  /* ── Full encode dimensions ──────────────────────────────── */
-  const [encW, encH] = ENCODE_DIMS[platform.aspect] ?? [720, 1280];
+  /* ── Full encode dimensions — always 1080p on every device ── */
+  const profile = useMemo(() => getDeviceProfile(), []);
+  const [encW, encH] = useMemo(() => {
+    return ENCODE_DIMS[platform.aspect] ?? [1080, 1920];
+  }, [platform.aspect]);
   const dispH = PREVIEW_H;
   const dispW = Math.round(PREVIEW_H * (encW / encH));
 
@@ -405,18 +409,39 @@ export function StepGenerate({
 
     let alive = true;
     let paused = false;
+    let fontsReady = false;
+    let lastDrawTime = 0;
+    const PREVIEW_FRAME_MS = 1000 / 30; // throttle to 30fps to save CPU
+
+    // Ensure fonts are loaded before the first frame renders
+    ensureFontsReady().then(() => { fontsReady = true; });
 
     const onVisibility = () => {
       paused = document.hidden;
       if (!paused) {
         previewStartRef.current = Date.now();
+        lastDrawTime = 0;
         animRef.current = requestAnimationFrame(draw);
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
 
-    const draw = () => {
+    const draw = (now: number) => {
       if (!alive || paused) return;
+      // Throttle: skip frames that come faster than 30fps
+      if (now - lastDrawTime < PREVIEW_FRAME_MS) {
+        animRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      lastDrawTime = now;
+      // Skip rendering until fonts are loaded (prevents fallback font flash)
+      if (!fontsReady) {
+        // Draw a dark background while waiting
+        ctx.fillStyle = "#09090f";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        animRef.current = requestAnimationFrame(draw);
+        return;
+      }
 
       const videoEl = bgVideoRef.current;
       const s = settingsRef.current;
@@ -425,7 +450,7 @@ export function StepGenerate({
       const sr = surahRef.current;
 
       const useVideoBg =
-        (s.background === "upload" || s.background === "library") &&
+        (s.background === "upload" || s.background === "library" || s.background === "pexels") &&
         videoEl !== null;
 
       const animP =
@@ -447,7 +472,7 @@ export function StepGenerate({
       animRef.current = requestAnimationFrame(draw);
     };
 
-    draw();
+    requestAnimationFrame(draw);
 
     return () => {
       alive = false;
@@ -455,6 +480,38 @@ export function StepGenerate({
       cancelAnimationFrame(animRef.current);
     };
   }, [encW, encH]);
+
+  /* ── Keyboard shortcuts for ayah navigation ──────────────── */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isGenerating || resultVideoUrl) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        onPreviewIdx(Math.max(0, previewIdx - 1));
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        onPreviewIdx(Math.min(ayahs.length - 1, previewIdx + 1));
+      } else if (e.key === " " && !isGenerating) {
+        e.preventDefault();
+        onGenerate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewIdx, ayahs.length, isGenerating, resultVideoUrl, onPreviewIdx, onGenerate]);
+
+  /* ── Copy verse text to clipboard ───────────────────────── */
+  const [copied, setCopied] = useState(false);
+  const handleCopyVerse = useCallback(() => {
+    const ayah = ayahs[previewIdx];
+    if (!ayah) return;
+    const text = `${ayah.text}\n\n— ${surah.englishName} ${surah.number}:${ayah.numberInSurah}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }, [ayahs, previewIdx, surah]);
 
   /* ── Derived ─────────────────────────────────────────────── */
   const lastLog = genLogs[genLogs.length - 1];
@@ -668,6 +725,7 @@ export function StepGenerate({
                 onClick={() => onPreviewIdx(Math.max(0, previewIdx - 1))}
                 disabled={previewIdx === 0}
                 className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-sm active:scale-90"
+                title="Previous (←)"
               >
                 ‹
               </button>
@@ -682,8 +740,19 @@ export function StepGenerate({
                 }
                 disabled={previewIdx === ayahs.length - 1}
                 className="h-7 w-7 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 disabled:opacity-30 transition text-sm active:scale-90"
+                title="Next (→)"
               >
                 ›
+              </button>
+              <button
+                onClick={handleCopyVerse}
+                className="ml-1 h-7 px-2.5 rounded-full border border-gold/20 text-gold/60 hover:bg-gold/10 transition text-[10px] flex items-center gap-1 active:scale-95"
+                title={ar ? "نسخ النص" : "Copy verse text"}
+              >
+                {copied ? "✓" : "⧉"}
+                <span className="hidden sm:inline">
+                  {copied ? (ar ? "نُسخ" : "Copied") : (ar ? "نسخ" : "Copy")}
+                </span>
               </button>
             </div>
           )}
@@ -720,7 +789,7 @@ export function StepGenerate({
 
         {/* ── Summary card ─────────────────────────────── */}
         <div className="flex-1 space-y-4 min-w-0">
-          <div className="rounded-sm border border-gold/15 bg-ink-light/20 p-5 kufic-frame">
+          <div className="gradient-border rounded-sm p-5 kufic-frame">
             <h3 className="text-xs font-medium text-gold/50 uppercase tracking-wider mb-4">
               {ar ? "ملخص" : "Summary"}
             </h3>
@@ -741,6 +810,7 @@ export function StepGenerate({
                     `${platformLabel} · ${platform.aspect}`,
                   ],
                   [ar ? "الدقة" : "Resolution", `${encW}×${encH}`],
+                  [ar ? "معدل الإطارات" : "Frame Rate", `${profile.outputFps} fps`],
                   [ar ? "الجودة" : "Output", "H.264 MP4 + AAC"],
                   [ar ? "المدة التقريبية" : "Est. Duration", `~${estDur}s`],
                 ] as [string, string][]
@@ -755,28 +825,42 @@ export function StepGenerate({
             </div>
           </div>
 
-          {/* Encoder note */}
+          {/* Encoder note + shortcuts */}
           <div className="rounded-sm border border-gold/10 bg-gold/[0.03] p-4 text-xs text-parchment-muted/70 space-y-1.5">
             <div className="flex items-center justify-between gap-1.5 text-gold/40 mb-1">
               <span className="flex items-center gap-1.5 uppercase tracking-wider font-medium">
                 <IslamicStarIcon className="h-3 w-3" />
                 {ar ? "ملاحظة" : "Note"}
               </span>
-              <button
-                onClick={() => setSoundEnabled((v) => !v)}
-                className="text-parchment-muted/40 hover:text-gold transition active:scale-90"
-                title={
-                  soundEnabled
-                    ? ar
-                      ? "كتم صوت الإشعار"
-                      : "Mute completion sound"
-                    : ar
-                      ? "تفعيل صوت الإشعار"
-                      : "Unmute completion sound"
-                }
-              >
-                {soundEnabled ? "🔊" : "🔇"}
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1 text-[10px] text-parchment-muted/30">
+                  <kbd className="px-1 py-0.5 rounded border border-gold/15 bg-ink-light/50">←</kbd>
+                  <kbd className="px-1 py-0.5 rounded border border-gold/15 bg-ink-light/50">→</kbd>
+                  <span className="hidden sm:inline">
+                    {ar ? "للتنقل" : "navigate"}
+                  </span>
+                  <span className="mx-1 text-gold/10">·</span>
+                  <kbd className="px-1 py-0.5 rounded border border-gold/15 bg-ink-light/50">Space</kbd>
+                  <span className="hidden sm:inline">
+                    {ar ? "إنتاج" : "generate"}
+                  </span>
+                </span>
+                <button
+                  onClick={() => setSoundEnabled((v) => !v)}
+                  className="text-parchment-muted/40 hover:text-gold transition active:scale-90"
+                  title={
+                    soundEnabled
+                      ? ar
+                        ? "كتم صوت الإشعار"
+                        : "Mute completion sound"
+                      : ar
+                        ? "تفعيل صوت الإشعار"
+                        : "Unmute completion sound"
+                  }
+                >
+                  {soundEnabled ? "🔊" : "🔇"}
+                </button>
+              </div>
             </div>
             <p>
               {ar

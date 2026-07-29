@@ -72,7 +72,7 @@ export function drawBackground(
   >,
 ): void {
   const isVideo =
-    (bgId === "upload" || bgId === "library") &&
+    (bgId === "upload" || bgId === "library" || bgId === "pexels") &&
     videoEl &&
     videoEl.readyState >= 2;
 

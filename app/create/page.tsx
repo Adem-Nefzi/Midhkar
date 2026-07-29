@@ -21,8 +21,8 @@ export default function CreatePage() {
   return (
     <I18nProvider>
       <main className="relative min-h-screen bg-ink text-parchment antialiased selection:bg-gold/30 selection:text-ink overflow-hidden">
-        {/* Girih tessellation background */}
-        <div className="absolute inset-0 opacity-[0.12] pointer-events-none">
+        {/* Girih tessellation background — hidden on mobile for performance */}
+        <div className="absolute inset-0 opacity-[0.12] pointer-events-none hidden sm:block">
           <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <pattern
@@ -61,9 +61,9 @@ export default function CreatePage() {
           </svg>
         </div>
 
-        {/* Manuscript grid overlay */}
+        {/* Manuscript grid overlay — hidden on mobile */}
         <div
-          className="absolute inset-0 pointer-events-none"
+          className="absolute inset-0 pointer-events-none hidden sm:block"
           style={{
             backgroundImage: `
               linear-gradient(to right, rgba(212,175,55,0.06) 1px, transparent 1px),
@@ -73,17 +73,17 @@ export default function CreatePage() {
           }}
         />
 
-        {/* Corner medallions */}
-        <div className="absolute -top-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none">
+        {/* Corner medallions — hidden on mobile for rendering performance */}
+        <div className="absolute -top-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none hidden sm:block">
           <QuarterMedallion />
         </div>
-        <div className="absolute -top-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-90">
+        <div className="absolute -top-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-90 hidden sm:block">
           <QuarterMedallion />
         </div>
-        <div className="absolute -bottom-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none -rotate-90">
+        <div className="absolute -bottom-6 -left-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none -rotate-90 hidden sm:block">
           <QuarterMedallion />
         </div>
-        <div className="absolute -bottom-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-180">
+        <div className="absolute -bottom-6 -right-6 h-[120px] w-[120px] sm:h-[160px] sm:w-[160px] lg:h-[200px] lg:w-[200px] opacity-70 pointer-events-none rotate-180 hidden sm:block">
           <QuarterMedallion />
         </div>
 

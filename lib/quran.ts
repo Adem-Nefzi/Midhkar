@@ -1,5 +1,12 @@
-const API_BASE = "https://api.alquran.cloud/v1";
-const QURAN_API_RECITERS = "https://quranapi.pages.dev/api/reciters.json";
+/**
+ * quran.ts
+ *
+ * All data sourced from the Quran Foundation API (api.quran.com/api/v4).
+ * Public content endpoints — no OAuth2 required.
+ * Per-ayah audio from the Quran Foundation CDN (everyayah.com / quranicaudio.com).
+ */
+
+const API_BASE = "https://api.quran.com/api/v4";
 
 export interface Surah {
   number: number;
@@ -30,34 +37,10 @@ export interface Reciter {
 }
 
 export const PLATFORMS = [
-  {
-    id: "youtube",
-    label: "YouTube Shorts",
-    icon: "yt",
-    aspect: "9:16",
-    fontSize: "medium",
-  },
-  {
-    id: "instagram",
-    label: "Instagram Reel",
-    icon: "ig",
-    aspect: "9:16",
-    fontSize: "large",
-  },
-  {
-    id: "facebook",
-    label: "Facebook",
-    icon: "fb",
-    aspect: "1:1",
-    fontSize: "medium",
-  },
-  {
-    id: "tiktok",
-    label: "TikTok",
-    icon: "tt",
-    aspect: "9:16",
-    fontSize: "large",
-  },
+  { id: "youtube", label: "YouTube Shorts", icon: "yt", aspect: "9:16", fontSize: "medium" },
+  { id: "instagram", label: "Instagram Reel", icon: "ig", aspect: "9:16", fontSize: "large" },
+  { id: "facebook", label: "Facebook", icon: "fb", aspect: "1:1", fontSize: "medium" },
+  { id: "tiktok", label: "TikTok", icon: "tt", aspect: "9:16", fontSize: "large" },
 ];
 
 export const TEXT_POSITIONS = [
@@ -72,16 +55,14 @@ export const TEXT_COLORS = [
   { id: "white", label: "White", value: "#ffffff" },
   { id: "cream", label: "Cream", value: "#faf5eb" },
   { id: "amber", label: "Amber", value: "#ffbf00" },
-  { id: "light-gold", label: "Light Gold", value: "#e5c76b" },
+  { id: "light-gold", label: "Lt. Gold", value: "#e5c76b" },
   { id: "emerald", label: "Emerald", value: "#50c878" },
   { id: "silver", label: "Silver", value: "#c0c0c0" },
   { id: "rose", label: "Rose Gold", value: "#e0bfb8" },
   { id: "ivory", label: "Ivory", value: "#fffff0" },
 ];
 
-export const ANIMATED_BG = [
-  { id: "upload", label: "Upload Video", icon: "📁" },
-];
+export const ANIMATED_BG = [{ id: "upload", label: "Upload Video", icon: "📁" }];
 
 export const VERSE_PRESETS = [
   { id: "first-3", label: "First 3" },
@@ -91,51 +72,86 @@ export const VERSE_PRESETS = [
   { id: "full", label: "Full Surah" },
 ];
 
-const QURAN_API_RECITERS_MAP: Record<
+/* ── Reciter mapping (Quran Foundation recitation IDs → audio CDNs) ── */
+const QURAN_FOUNDATION_RECITERS: Record<
   number,
-  { englishName: string; name: string }
+  { englishName: string; name: string; everyayahFolder: string }
 > = {
-  1: { englishName: "Mishary Al Afasy", name: "مشاري العفاسي" },
-  2: { englishName: "Abu Bakr Al Shatri", name: "أبو بكر الشاطري" },
-  3: { englishName: "Nasser Al Qatami", name: "ناصر القطامي" },
-  4: { englishName: "Yasser Al Dosari", name: "ياسر الدوسري" },
-  5: { englishName: "Hani Ar Rifai", name: "هاني الرفاعي" },
+  7: { englishName: "Mishary Al Afasy", name: "مشاري العفاسي", everyayahFolder: "Alafasy_128kbps" },
+  4: { englishName: "Abu Bakr Al Shatri", name: "أبو بكر الشاطري", everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps" },
+  3: { englishName: "Nasser Al Qatami", name: "ناصر القطامي", everyayahFolder: "Nasser_Alqatami_128kbps" },
+  5: { englishName: "Hani Ar Rifai", name: "هاني الرفاعي", everyayahFolder: "Hani_Rifai_192kbps" },
+  1: { englishName: "AbdulBaset (Murattal)", name: "عبد الباسط", everyayahFolder: "Abdul_Basit_Murattal_192kbps" },
+  6: { englishName: "Mahmoud Al Husary", name: "محمود الحصري", everyayahFolder: "Husary_128kbps" },
+  10: { englishName: "Saud Al Shuraim", name: "سعود الشريم", everyayahFolder: "Saood_ash-Shuraym_128kbps" },
+  9: { englishName: "Minshawi (Murattal)", name: "المنشاوي", everyayahFolder: "Minshawy_Murattal_128kbps" },
 };
 
-async function fetchJson<T>(url: string): Promise<{ data: T }> {
+/* ── Translation IDs on the Quran Foundation API ─────────────────── */
+const TRANSLATION_IDS: Record<string, number> = {
+  en: 131, // Sahih International
+  fr: 136, // Hamidullah (French)
+  ar: 0,   // No translation for Arabic
+};
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const cacheKey = `midhkar:${url}`;
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached) as T;
+  } catch { /* sessionStorage unavailable */ }
+
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return { data: await res.json() };
+  const data = await res.json();
+  try {
+    sessionStorage.setItem(cacheKey, JSON.stringify(data));
+  } catch { /* quota exceeded — don't block */ }
+  return data;
 }
 
+/* ── Surahs ──────────────────────────────────────────────────────── */
 export async function fetchSurahs(): Promise<Surah[]> {
-  const { data } = await fetchJson<any>(`${API_BASE}/surah`);
-  return data.data || data || [];
+  const data = await fetchJson<any>(`${API_BASE}/chapters?language=en`);
+  const chapters = data.chapters || [];
+  return chapters.map((c: any) => ({
+    number: c.id,
+    name: c.name_arabic,
+    englishName: c.name_simple,
+    englishNameTranslation: c.translated_name?.name || "",
+    numberOfAyahs: c.verses_count,
+    revelationType: c.revelation_place,
+  }));
 }
 
+/* ── Reciters ────────────────────────────────────────────────────── */
 export async function fetchReciters(): Promise<Reciter[]> {
   const results: Reciter[] = [];
 
   try {
-    const recitersRaw =
-      await fetchJson<Record<string, string>>(QURAN_API_RECITERS);
-    const reciterMap = recitersRaw.data || {};
-    for (const [no, name] of Object.entries(reciterMap)) {
-      const info = QURAN_API_RECITERS_MAP[Number(no)];
+    const data = await fetchJson<any>(
+      `${API_BASE}/resources/recitations?language=en`,
+    );
+    const recitations = data.recitations || [];
+
+    for (const r of recitations) {
+      const mapped = QURAN_FOUNDATION_RECITERS[r.id];
+      if (!mapped) continue;
       results.push({
-        identifier: `quranapi-${no}`,
-        englishName: info?.englishName || name,
-        name: info?.name || name,
-        quranApiNo: Number(no),
+        identifier: `quranapi-${r.id}`,
+        englishName: mapped.englishName,
+        name: mapped.name,
+        quranApiNo: r.id,
         source: "quranapi",
       });
     }
   } catch {
-    /* fall through */
+    /* fall through to hardcoded */
   }
 
+  // Fallback: use hardcoded reciters if API fails
   if (results.length === 0) {
-    for (const [no, info] of Object.entries(QURAN_API_RECITERS_MAP)) {
+    for (const [no, info] of Object.entries(QURAN_FOUNDATION_RECITERS)) {
       results.push({
         identifier: `quranapi-${no}`,
         englishName: info.englishName,
@@ -149,36 +165,49 @@ export async function fetchReciters(): Promise<Reciter[]> {
   return results;
 }
 
+/* ── Ayahs (Uthmani text) ───────────────────────────────────────── */
 export async function fetchAyahs(surahNumber: number): Promise<Ayah[]> {
-  const { data } = await fetchJson<any>(
-    `${API_BASE}/surah/${surahNumber}/quran-uthmani`,
+  const data = await fetchJson<any>(
+    `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&fields=text_uthmani,juz_number,page_number,sajdah_number&page=1&per_page=300`,
   );
-  const ayahs = data.data?.ayahs || data.ayahs || [];
-  return ayahs.map((a: any) => ({
-    number: a.number,
-    numberInSurah: a.numberInSurah,
-    text: a.text,
-    juz: a.juz,
-    page: a.page,
-    sajda: a.sajda,
+  const verses = data.verses || [];
+  return verses.map((v: any) => ({
+    number: v.id,
+    numberInSurah: v.verse_number,
+    text: v.text_uthmani || "",
+    juz: v.juz_number || 1,
+    page: v.page_number || 1,
+    sajda: !!v.sajdah_number,
   }));
 }
 
+/* ── Translations ───────────────────────────────────────────────── */
 export async function fetchTranslation(
   surahNumber: number,
   lang: string,
 ): Promise<Map<number, string>> {
-  if (lang === "ar") return new Map();
-  const transId = lang === "fr" ? "fr.hamidullah" : "en.sahih";
-  const { data } = await fetchJson<any>(
-    `${API_BASE}/surah/${surahNumber}/${transId}`,
+  const transId = TRANSLATION_IDS[lang];
+  if (!transId) return new Map();
+
+  const data = await fetchJson<any>(
+    `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&translations=${transId}&fields=verse_number&page=1&per_page=300`,
   );
-  const ayahs = data.data?.ayahs || data.ayahs || [];
+  const verses = data.verses || [];
   const map = new Map<number, string>();
-  ayahs.forEach((a: any) => map.set(a.numberInSurah, a.text));
+  for (const v of verses) {
+    const text =
+      v.translations?.[0]?.text ||
+      v.translations?.find((t: any) => t.resource_id === transId)?.text ||
+      "";
+    // Strip HTML tags from translation text
+    const clean = text.replace(/<[^>]+>/g, "");
+    if (clean) map.set(v.verse_number, clean);
+  }
   return map;
 }
 
+/* ── Per-ayah audio URLs ────────────────────────────────────────── */
+/** Primary: the-quran-project CDN (reliable, fast) */
 export function getQuranApiAudioUrl(
   reciterNo: number,
   surah: number,
@@ -187,24 +216,15 @@ export function getQuranApiAudioUrl(
   return `https://the-quran-project.github.io/Quran-Audio/Data/${reciterNo}/${surah}_${ayah}.mp3`;
 }
 
-const EVERYAYAH_MAP: Record<number, { folder: string; reciterNo: number }> = {
-  1: { folder: "Alafasy_128kbps", reciterNo: 1 },
-  2: { folder: "Abu_Bakr_Ash-Shaatree_128kbps", reciterNo: 2 },
-  3: { folder: "Nasser_Alqatami_128kbps", reciterNo: 3 },
-  4: { folder: "Yasser_Ad-Dussary_128kbps", reciterNo: 4 },
-  5: { folder: "Hani_Rifai_192kbps", reciterNo: 5 },
-};
-
+/** Fallback: everyayah.com (Quran Foundation CDN) */
 export function getEveryayahAudioUrl(
   reciterNo: number,
   surah: number,
   ayah: number,
 ): string | null {
-  const entry = EVERYAYAH_MAP[reciterNo];
+  const entry = QURAN_FOUNDATION_RECITERS[reciterNo];
   if (!entry) return null;
   const surahStr = String(surah).padStart(3, "0");
   const ayahStr = String(ayah).padStart(3, "0");
-  return `https://everyayah.com/data/${entry.folder}/${surahStr}${ayahStr}.mp3`;
+  return `https://everyayah.com/data/${entry.everyayahFolder}/${surahStr}${ayahStr}.mp3`;
 }
-
-

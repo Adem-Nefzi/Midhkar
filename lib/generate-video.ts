@@ -34,6 +34,7 @@ import {
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, GenLog } from "@/lib/types";
 import { drawAyahFrame, drawBackground } from "@/lib/canva-utils";
+import { ensureFontsReady } from "@/lib/fonts-ready";
 import type {
   WorkerInMessage,
   WorkerOutMessage,
@@ -44,31 +45,40 @@ export { isWebCodecsSupported };
 
 /* ── Constants ───────────────────────────────────────────────── */
 
-const FPS = 30;
-const LEAD_IN_SEC = 0; // No pre-roll silence — text/audio start together.
+const RENDER_FPS = 30;        // Unique frames rendered per second
+const OUTPUT_FPS = 60;        // Encoded output FPS (frame-doubled from RENDER_FPS)
+const FPS = RENDER_FPS;       // Used by buildSegments for frame allocation
+const LEAD_IN_SEC = 0;        // No pre-roll silence — text/audio start together.
 const FALLBACK_DUR = 6;
 const MAX_BG_FRAMES = 900;
 const AUDIO_CONCURRENCY = 6;
 
-const ASPECT: Record<string, [number, number]> = {
-  "16:9": [1280, 720],
-  "9:16": [720, 1280],
-  "1:1": [1080, 1080],
+/** Full-HD resolutions — always 1080p on every device. */
+const ASPECT_FULL: Record<string, [number, number]> = {
+  "16:9": [1920, 1080],
+  "9:16": [1080, 1920],
+  "1:1":  [1080, 1080],
 };
 
 /* ══════════════════════════════════════════════════════════════
-   Device-adaptive quality profile (unchanged from v7)
+   Device-adaptive quality profile
+   ──────────────────────────────────────────────────────────────
+   Resolution and FPS are always 1080p@60fps on every device.
+   Only bitrate scales down on low-power mobile to keep encode
+   speed fast without sacrificing resolution.
 ══════════════════════════════════════════════════════════════ */
 
 export interface DeviceProfile {
   isLowPower: boolean;
   bitrateScale: number;
   latencyMode: "quality" | "realtime";
+  outputFps: number;    // always 60
+  renderFps: number;    // always 30 (unique render rate, frame-doubled to 60)
 }
 
 export function getDeviceProfile(): DeviceProfile {
   if (typeof navigator === "undefined") {
-    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime" };
+    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime", outputFps: 60, renderFps: 30 };
   }
   const ua = navigator.userAgent || "";
   const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
@@ -80,15 +90,18 @@ export function getDeviceProfile(): DeviceProfile {
 
   return {
     isLowPower,
-    bitrateScale: isLowPower ? 0.7 : 1,
+    bitrateScale: isLowPower ? 0.6 : 1,
     latencyMode: "realtime",
+    outputFps: 60,
+    renderFps: 30,
   };
 }
 
 function getOutputResolution(
   platform: (typeof PLATFORMS)[0],
+  _profile: DeviceProfile,
 ): [number, number] {
-  return ASPECT[platform.aspect] ?? [720, 1280];
+  return ASPECT_FULL[platform.aspect] ?? [1080, 1920];
 }
 
 function getVideoBitrate(
@@ -98,10 +111,11 @@ function getVideoBitrate(
 ): number {
   const pixels = cw * ch;
   let base: number;
-  if (pixels >= 1080 * 1080) base = 3_500_000;
-  else if (pixels >= 1280 * 720) base = 3_000_000;
-  else base = 2_500_000;
-  return Math.round(base * profile.bitrateScale);
+  if (pixels >= 1080 * 1920)      base = 6_000_000; // 1080p portrait
+  else if (pixels >= 1920 * 1080) base = 6_000_000; // 1080p landscape
+  else                            base = 4_500_000; // 1080p square
+  // outputFps is always 60 now, so fpsScale is always 2
+  return Math.round(base * profile.bitrateScale * 2);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -204,7 +218,7 @@ async function getBackgroundBytes(
     if (settings.background === "upload" && settings.uploadedVideoFile) {
       return await settings.uploadedVideoFile.arrayBuffer();
     }
-    if (settings.background === "library" && settings.videoUrl) {
+    if ((settings.background === "library" || settings.background === "pexels") && settings.videoUrl) {
       const r = await fetch(settings.videoUrl, { signal });
       if (!r.ok) return null;
       return await r.arrayBuffer();
@@ -232,10 +246,10 @@ async function renderAyahOverlays(
   const canvas = document.createElement("canvas");
   canvas.width = cw;
   canvas.height = ch;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
   const isStaticBg =
-    settings.background !== "upload" && settings.background !== "library";
+    settings.background !== "upload" && settings.background !== "library" && settings.background !== "pexels";
   const bitmaps: ImageBitmap[] = [];
 
   for (let i = 0; i < prepared.length; i++) {
@@ -255,7 +269,7 @@ async function renderAyahOverlays(
       drawWatermark(ctx, cw, ch, settings.watermarkText);
     }
 
-    bitmaps.push(await createImageBitmap(canvas));
+    bitmaps.push(await createImageBitmap(canvas, { premultiplyAlpha: "premultiply" }));
     onProgress(i + 1, prepared.length);
   }
 
@@ -332,7 +346,7 @@ export function renderFullFrame(
   ctx.clearRect(0, 0, w, h);
 
   const useVideoBg =
-    settings.background === "upload" || settings.background === "library";
+    settings.background === "upload" || settings.background === "library" || settings.background === "pexels";
   if (useVideoBg) {
     if (bgBitmap) {
       ctx.drawImage(bgBitmap, 0, 0, w, h);
@@ -468,10 +482,10 @@ export async function generateVideo(params: {
   const log = (msg: string, pct: number) => onLog({ msg, pct });
 
   const profile = getDeviceProfile();
-  const [cw, ch] = getOutputResolution(platform);
+  const [cw, ch] = getOutputResolution(platform, profile);
 
   const needsBgVideo =
-    settings.background === "upload" || settings.background === "library";
+    settings.background === "upload" || settings.background === "library" || settings.background === "pexels";
 
   await acquireWakeLock();
   signal.addEventListener("abort", releaseWakeLock, { once: true });
@@ -545,6 +559,8 @@ export async function generateVideo(params: {
 
     /* ── 3. Render text overlays (main thread, cheap) ───────── */
     log("Rendering text overlays…", 30);
+    // Ensure all fonts are loaded before canvas tries to use them
+    await ensureFontsReady();
     const ayahFrameBitmaps = await renderAyahOverlays(
       prepared,
       surah,
@@ -575,12 +591,12 @@ export async function generateVideo(params: {
     const blob = await runWorkerEncode({
       cw,
       ch,
-      fps: FPS,
+      renderFps: profile.renderFps,
+      outputFps: profile.outputFps,
       videoBitrate: getVideoBitrate(cw, ch, profile),
       audioBitrate: 128_000,
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS,
-      frameDurationS: 1 / FPS,
       segments,
       ayahFrameBitmaps,
       bgVideoBytes,
@@ -607,12 +623,12 @@ export async function generateVideo(params: {
 function runWorkerEncode(opts: {
   cw: number;
   ch: number;
-  fps: number;
+  renderFps: number;
+  outputFps: number;
   videoBitrate: number;
   audioBitrate: number;
   sampleRate: number;
   channels: number;
-  frameDurationS: number;
   segments: WorkerSegment[];
   ayahFrameBitmaps: ImageBitmap[];
   bgVideoBytes: ArrayBuffer | null;
@@ -664,12 +680,12 @@ function runWorkerEncode(opts: {
       payload: {
         cw: opts.cw,
         ch: opts.ch,
-        fps: opts.fps,
+        renderFps: opts.renderFps,
+        outputFps: opts.outputFps,
         videoBitrate: opts.videoBitrate,
         audioBitrate: opts.audioBitrate,
         sampleRate: opts.sampleRate,
         channels: opts.channels,
-        frameDurationS: opts.frameDurationS,
         segments: opts.segments,
         ayahFrameBitmaps: opts.ayahFrameBitmaps,
         bgVideoBytes: opts.bgVideoBytes,

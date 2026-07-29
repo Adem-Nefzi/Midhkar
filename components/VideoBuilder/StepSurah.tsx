@@ -102,6 +102,35 @@ export function StepSurah({
     return list;
   }, [surahs, query, filter]);
 
+  // Virtualized slicing: render at most 60 surah cards in the DOM at a time
+  const [visibleCount, setVisibleCount] = useState(60);
+  const visible = useMemo(
+    () => filtered.slice(0, visibleCount),
+    [filtered, visibleCount],
+  );
+
+  // Reset pagination when filter or query changes
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [filter, query]);
+
+  // Infinite scroll: load more when user scrolls near the bottom
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleCount < filtered.length) {
+          setVisibleCount((c) => Math.min(c + 60, filtered.length));
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visibleCount, filtered.length]);
+
   const popular = useMemo(
     () => surahs.filter((s) => POPULAR_NUMBERS.includes(s.number)),
     [surahs],
@@ -275,18 +304,27 @@ export function StepSurah({
 
       {/* Grid */}
       {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold/30 border-t-gold" />
-            <span className="text-xs text-parchment-muted/40">
-              {locale === "ar" ? "جاري التحميل..." : "Loading surahs..."}
-            </span>
-          </div>
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="rounded-sm border border-gold/[0.08] bg-ink-light/20 p-4">
+              <div className="flex items-start gap-3">
+                <div className="skeleton h-10 w-10 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <div className="skeleton h-4 w-24" />
+                  <div className="skeleton h-3 w-32" />
+                  <div className="flex gap-2 mt-1.5">
+                    <div className="skeleton h-4 w-14 rounded-full" />
+                    <div className="skeleton h-4 w-10 rounded-full" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <>
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
-            {filtered.map((surah) => {
+            {visible.map((surah) => {
               const isSelected = selected?.number === surah.number;
               return (
                 <button
@@ -294,10 +332,10 @@ export function StepSurah({
                   onClick={() => onSelect(surah)}
                   onMouseEnter={(e) => handleSurahHover(surah, e)}
                   onMouseLeave={() => handleSurahHover(null)}
-                  className={`group relative rounded-sm border p-4 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                  className={`group relative rounded-sm border p-4 text-left transition-all duration-300 hover:-translate-y-1 glow-hover ${
                     isSelected
                       ? "border-gold/50 bg-gold/[0.08] ring-1 ring-gold/25 shadow-lg shadow-gold/5"
-                      : "border-gold/[0.08] bg-ink-light/20 hover:border-gold/20 hover:bg-ink-light/40 hover:shadow-md hover:shadow-gold/[0.03]"
+                      : "border-gold/[0.08] bg-ink-light/20 hover:border-gold/20 hover:bg-ink-light/40"
                   }`}
                 >
                   <KuficBorder />
@@ -374,6 +412,13 @@ export function StepSurah({
               </div>
             )}
           </div>
+
+          {/* Infinite scroll sentinel */}
+          {visibleCount < filtered.length && (
+            <div ref={sentinelRef} className="flex justify-center py-6">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gold/20 border-t-gold" />
+            </div>
+          )}
 
           {/* Next button */}
           {selected && (

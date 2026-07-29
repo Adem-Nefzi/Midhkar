@@ -77,6 +77,33 @@ export function StepVerses({
     );
   }, [ayahs, query]);
 
+  // Virtualized: show first 50 ayahs, load more on scroll
+  const [visibleCount, setVisibleCount] = useState(50);
+  const visible = useMemo(
+    () => filtered.slice(0, visibleCount),
+    [filtered, visibleCount],
+  );
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [query]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleCount < filtered.length) {
+          setVisibleCount((c) => Math.min(c + 50, filtered.length));
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visibleCount, filtered.length]);
+
   const sortedSelected = useMemo(
     () => Array.from(selected).sort((a, b) => a - b),
     [selected],
@@ -178,17 +205,23 @@ export function StepVerses({
       {/* Verse list */}
       <div className="rounded-sm border border-gold/15 bg-ink-light/15 overflow-hidden shadow-lg shadow-black/10">
         {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="flex flex-col items-center gap-3">
-              <Spinner className="h-6 w-6 text-gold" />
-              <span className="text-xs text-parchment-muted/40">
-                {locale === "ar" ? "جاري تحميل الآيات..." : "Loading verses..."}
-              </span>
-            </div>
+          <div className="max-h-[520px] overflow-y-auto custom-scrollbar">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="border-b border-gold/[0.04] px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="skeleton h-8 w-8 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <div className="skeleton h-4 w-3/4" />
+                    <div className="skeleton h-3 w-1/2" />
+                  </div>
+                  <div className="skeleton h-6 w-6 rounded-md" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="max-h-[520px] overflow-y-auto custom-scrollbar">
-            {filtered.map((ayah) => {
+            {visible.map((ayah) => {
               const sel = selected.has(ayah.numberInSurah);
               return (
                 <div
@@ -202,7 +235,7 @@ export function StepVerses({
                   }}
                   onMouseEnter={() => setHoveredAyah(ayah.numberInSurah)}
                   onMouseLeave={() => setHoveredAyah(null)}
-                  className={`border-b border-gold/[0.04] px-5 py-4 cursor-pointer transition-all duration-200 ${
+                  className={`border-b border-gold/[0.04] px-5 py-4 cursor-pointer transition-all duration-300 glow-hover ${
                     sel
                       ? "bg-gold/[0.06] border-l-[3px] border-l-gold/60"
                       : "hover:bg-ink-light/30 border-l-[3px] border-l-transparent hover:border-l-gold/15"
@@ -251,6 +284,11 @@ export function StepVerses({
                 </div>
               );
             })}
+            {visibleCount < filtered.length && (
+              <div ref={sentinelRef} className="flex justify-center py-4">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-gold/20 border-t-gold" />
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -24,7 +24,7 @@
  *    tactile hover/press micro-animations throughout.
  */
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import {
   GeometricRosette,
   CrescentMoonIcon,
@@ -52,6 +52,8 @@ import {
   VideoSettings,
 } from "@/lib/types";
 import type { PlatformId, Preset } from "@/lib/types";
+import { searchPexelsVideos } from "@/lib/pexels-client";
+import type { PexelsVideo } from "@/lib/pexels-client";
 
 /* ── Text colour palette ─────────────────────────────────────── */
 const TEXT_COLORS = [
@@ -390,7 +392,7 @@ export function StepSettings({
                   <button
                     key={r.identifier}
                     onClick={() => onSelectReciter(r)}
-                    className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all ${
+                    className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all duration-300 glow-hover ${
                       active
                         ? "border-gold/40 bg-gold/10 ring-1 ring-gold/25"
                         : "border-gold/10 hover:border-gold/25 hover:bg-ink-light/40"
@@ -594,7 +596,7 @@ export function StepSettings({
 
               {/* Background source */}
               <Field label={ar ? "نوع الخلفية" : "Background"}>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   <ToggleBtn
                     active={settings.background === "color"}
                     onClick={() => onChange("background", "color")}
@@ -605,13 +607,19 @@ export function StepSettings({
                     active={settings.background === "upload"}
                     onClick={() => fileRef.current?.click()}
                   >
-                    📁 {ar ? "فيديو" : "Video"}
+                    📁 {ar ? "رفع" : "Upload"}
                   </ToggleBtn>
                   <ToggleBtn
                     active={settings.background === "library"}
                     onClick={() => onChange("background", "library")}
                   >
                     🗂 {ar ? "مكتبة" : "Library"}
+                  </ToggleBtn>
+                  <ToggleBtn
+                    active={settings.background === "pexels"}
+                    onClick={() => onChange("background", "pexels")}
+                  >
+                    🎬 {ar ? "اونلاين" : "Online"}
                   </ToggleBtn>
                 </div>
                 <input
@@ -777,6 +785,7 @@ export function StepSettings({
                                 e.currentTarget.currentTime = 1;
                               }}
                             />
+                            <DurationBadge videoRef={v.url} />
                             {settings.videoUrl === v.url && (
                               <div className="absolute inset-0 bg-gold/20 flex items-center justify-center">
                                 <CheckIcon className="h-4 w-4 text-gold" />
@@ -804,6 +813,22 @@ export function StepSettings({
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Pexels video search */}
+              {settings.background === "pexels" && (
+                <PexelsSearch
+                  ar={ar}
+                  selected={settings.videoUrl}
+                  onSelect={(url, thumb) => {
+                    onChange("videoUrl", url);
+                    onChange("videoThumb", thumb);
+                  }}
+                  onClear={() => {
+                    onChange("videoUrl", null);
+                    onChange("videoThumb", null);
+                  }}
+                />
               )}
 
               {/* Overlay style */}
@@ -1444,5 +1469,253 @@ function SwitchRow({
         {label}
       </span>
     </label>
+  );
+}
+
+/* ── Duration Badge (reads video metadata) ──────────────────── */
+
+function DurationBadge({ videoRef }: { videoRef: string }) {
+  const [duration, setDuration] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!videoRef) return;
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.src = videoRef;
+    const onMeta = () => {
+      if (video.duration && isFinite(video.duration)) {
+        setDuration(video.duration);
+      }
+    };
+    video.addEventListener("loadedmetadata", onMeta);
+    return () => video.removeEventListener("loadedmetadata", onMeta);
+  }, [videoRef]);
+
+  if (duration === null) return null;
+
+  const mins = Math.floor(duration / 60);
+  const secs = Math.round(duration % 60);
+  const label = `${mins}:${secs.toString().padStart(2, "0")}`;
+
+  return (
+    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
+      {label}
+    </span>
+  );
+}
+
+/* ── Pexels Video Search ───────────────────────────────────── */
+
+const PEXELS_CATEGORIES = [
+  "nature",
+  "ocean",
+  "mountains",
+  "forest",
+  "sunset",
+  "city",
+  "space",
+  "rain",
+  "snow",
+  "desert",
+  "flowers",
+  "waterfall",
+  "clouds",
+  "stars",
+  "mosque",
+];
+
+function PexelsSearch({
+  ar,
+  selected,
+  onSelect,
+  onClear,
+}: {
+  ar: boolean;
+  selected: string | null;
+  onSelect: (url: string, thumb: string) => void;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState("nature");
+  const [results, setResults] = useState<PexelsVideo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const doSearch = useCallback(
+    async (q: string, p: number, append: boolean) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await searchPexelsVideos(q, p);
+        setResults((prev) =>
+          append ? [...prev, ...data.videos] : data.videos,
+        );
+        setHasMore(!!data.nextPage && data.videos.length > 0);
+      } catch (err: any) {
+        setError(err?.message ?? "Search failed");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const t = setTimeout(() => doSearch(query, 1, false), 400);
+    return () => clearTimeout(t);
+  }, [query, doSearch]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loading) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          const next = page + 1;
+          setPage(next);
+          doSearch(query, next, true);
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, loading, page, query, doSearch]);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-gold/10 bg-ink-light/20 p-4">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-parchment-muted uppercase tracking-wider">
+          {ar ? "بحث فيديوهات بكسلز" : "Pexels Video Search"}
+        </p>
+        <a
+          href="https://www.pexels.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[9px] text-parchment-muted/40 hover:text-gold/60 transition"
+        >
+          {ar ? "صور من بكسلز" : "Videos by Pexels"}
+        </a>
+      </div>
+
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setPage(1);
+          }}
+          placeholder={
+            ar
+              ? "ابحث: طبيعة، محيط، جبال..."
+              : "Search: nature, ocean, mountains..."
+          }
+          className="w-full rounded-lg border border-gold/20 bg-ink-light/40 px-3 py-2.5 pl-9 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/40 focus:ring-1 focus:ring-gold/20 transition"
+        />
+        <svg
+          className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gold/30"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
+          />
+        </svg>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {PEXELS_CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => {
+              setQuery(cat);
+              setPage(1);
+            }}
+            className={`rounded-full border px-2.5 py-1 text-[10px] capitalize transition-all ${
+              query === cat
+                ? "border-gold/40 bg-gold/15 text-gold"
+                : "border-gold/10 text-parchment-muted/60 hover:border-gold/25 hover:text-parchment"
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {loading && results.length === 0 ? (
+        <div className="flex justify-center py-6">
+          <Spinner className="h-5 w-5 text-gold" />
+        </div>
+      ) : error ? (
+        <p className="text-xs text-red-400 py-3 text-center">{error}</p>
+      ) : results.length === 0 ? (
+        <p className="text-xs text-parchment-muted/40 py-4 text-center">
+          {ar ? "لا توجد نتائج" : "No results found"}
+        </p>
+      ) : (
+        <>
+          <div className="max-h-64 overflow-y-auto custom-scrollbar">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {results.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => onSelect(v.videoUrl, v.image)}
+                  className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
+                    selected === v.videoUrl
+                      ? "border-gold ring-2 ring-gold/30"
+                      : "border-gold/10 hover:border-gold/30"
+                  }`}
+                >
+                  <img
+                    src={v.image}
+                    alt={v.photographer}
+                    loading="lazy"
+                    className="w-full h-full object-cover"
+                  />
+                  <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
+                    {Math.floor(v.duration / 60)}:
+                    {(v.duration % 60).toString().padStart(2, "0")}
+                  </span>
+                  <span className="absolute top-1.5 left-1.5 rounded bg-gold/20 backdrop-blur-sm px-1.5 py-0.5 text-[8px] font-medium text-gold pointer-events-none">
+                    {v.width}×{v.height}
+                  </span>
+                  {selected === v.videoUrl && (
+                    <div className="absolute inset-0 bg-gold/20 flex items-center justify-center">
+                      <CheckIcon className="h-4 w-4 text-gold" />
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+            {hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-4">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-gold/20 border-t-gold" />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {selected && (
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] text-gold/40">
+            ✓ {ar ? "فيديو محدد" : "Video selected"}
+          </span>
+          <button
+            onClick={onClear}
+            className="text-[10px] text-red-400/60 hover:text-red-400 transition"
+          >
+            {ar ? "إزالة" : "Remove"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -80,7 +80,9 @@
 
   .kufic-frame {
     position: relative;
-    border: 1px solid rgba(212, 175, 55, 0.15);
+    background: rgba(28, 25, 23, 0.5);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
   }
   .kufic-frame::before {
     content: "";
@@ -100,10 +102,12 @@
     gap: 10px;
     border-radius: 12px;
     border: 2px solid rgba(212, 175, 55, 0.12);
-    background: rgba(28, 25, 23, 0.4);
+    background: rgba(28, 25, 23, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     padding: 16px 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
     overflow: hidden;
   }
   .platform-card::before {
@@ -155,6 +159,129 @@
     border-color: rgba(212, 175, 55, 0.5);
     background: rgba(212, 175, 55, 0.1);
     box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.2);
+  }
+
+  /* ── Glassmorphism ───────────────────────────────────────── */
+  .glass {
+    background: rgba(28, 25, 23, 0.5);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid rgba(212, 175, 55, 0.08);
+  }
+  .glass-strong {
+    background: rgba(12, 10, 9, 0.7);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(212, 175, 55, 0.1);
+  }
+
+  /* ── Skeleton shimmer ────────────────────────────────────── */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(28, 25, 23, 0.4) 25%,
+      rgba(212, 175, 55, 0.06) 50%,
+      rgba(28, 25, 23, 0.4) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+    border-radius: 6px;
+  }
+
+  /* ── Step transition ─────────────────────────────────────── */
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(24px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes slide-in-left {
+    from { opacity: 0; transform: translateX(-24px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .step-enter-right {
+    animation: slide-in-right 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .step-enter-left {
+    animation: slide-in-left 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* ── Animated gradient border ────────────────────────────── */
+  @keyframes border-rotate {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .gradient-border {
+    position: relative;
+    border-radius: 12px;
+    background: rgba(28, 25, 23, 0.5);
+  }
+  .gradient-border::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      rgba(212, 175, 55, 0.4),
+      rgba(95, 141, 110, 0.2),
+      rgba(212, 175, 55, 0.4),
+      rgba(212, 175, 55, 0.1)
+    );
+    background-size: 300% 300%;
+    animation: border-rotate 4s ease-in-out infinite;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* ── Gold glow on hover ──────────────────────────────────── */
+  .glow-hover {
+    transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .glow-hover:hover {
+    box-shadow:
+      0 0 0 1px rgba(212, 175, 55, 0.3),
+      0 4px 20px rgba(212, 175, 55, 0.15),
+      0 0 40px rgba(212, 175, 55, 0.08);
+    transform: translateY(-3px);
+    border-color: rgba(212, 175, 55, 0.35) !important;
+  }
+
+  /* ── Islamic geometric divider ──────────────────────────── */
+  .geometric-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 2rem 0;
+    opacity: 0.4;
+  }
+  .geometric-divider::before,
+  .geometric-divider::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    max-width: 100px;
+    background: linear-gradient(to right, transparent, rgba(212, 175, 55, 0.3), transparent);
+  }
+  .geometric-divider::after {
+    background: linear-gradient(to left, transparent, rgba(212, 175, 55, 0.3), transparent);
+  }
+
+  /* ── Micro-interactions ─────────────────────────────────── */
+  .btn-press {
+    transition: transform 0.1s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+  }
+  .btn-press:active {
+    transform: scale(0.96);
   }
 
   /* ── Range slider ────────────────────────────────────────── */

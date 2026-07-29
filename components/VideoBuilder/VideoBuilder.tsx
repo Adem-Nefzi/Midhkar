@@ -30,8 +30,16 @@ import {
 import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
 import { StepSurah } from "./StepSurah";
 import { StepVerses } from "./StepVerses";
-import { StepGenerate } from "./StepGenerate";
-import { StepSettings } from "./StepSettings";
+import dynamic from "next/dynamic";
+
+const StepGenerate = dynamic(() =>
+  import("./StepGenerate").then((m) => m.StepGenerate),
+  { ssr: false },
+);
+const StepSettings = dynamic(() =>
+  import("./StepSettings").then((m) => m.StepSettings),
+  { ssr: false },
+);
 
 function buildPlatform(id: PlatformId) {
   const meta = PLATFORM_META[id];
@@ -54,14 +62,14 @@ function StepIndicator({ step, locale }: { step: number; locale: string }) {
   ];
   return (
     <nav
-      className="mb-12 flex items-center justify-center gap-2"
+      className="mb-12 flex items-center justify-center gap-2 glass rounded-full px-6 py-3"
       aria-label="Progress"
     >
       {steps.map((s, i) => (
         <div key={s.num} className="flex items-center gap-2">
           <div className="flex flex-col items-center">
             <div
-              className={`flex h-8 w-8 items-center justify-center rounded-full border text-xs font-semibold transition-all ${step >= s.num ? "border-gold/40 bg-gold/15 text-gold" : "border-gold/10 bg-ink-light/30 text-parchment-muted"}`}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold transition-all duration-300 ${step >= s.num ? "border-gold/40 bg-gold/15 text-gold shadow-sm shadow-gold/10" : "border-gold/10 bg-ink-light/30 text-parchment-muted"}`}
               aria-current={step === s.num ? "step" : undefined}
             >
               {step > s.num ? (
@@ -392,11 +400,13 @@ export function VideoBuilder() {
     if (!bgEl) return;
 
     const needsVideo =
-      settings.background === "upload" || settings.background === "library";
+      settings.background === "upload" ||
+      settings.background === "library" ||
+      settings.background === "pexels";
     if (!needsVideo) return;
 
     const src =
-      settings.background === "library"
+      settings.background === "library" || settings.background === "pexels"
         ? settings.videoUrl
         : settings.uploadedVideoUrl;
     if (!src || loadedBgSrcRef.current === src) return;
@@ -669,6 +679,7 @@ export function VideoBuilder() {
 
         <StepIndicator step={step} locale={locale} />
 
+        <div key={step} className="step-enter-right">
         {step === 1 && (
           <StepSurah
             surahs={surahs}
@@ -755,6 +766,7 @@ export function VideoBuilder() {
               locale={locale}
             />
           )}
+        </div>
       </div>
     </div>
   );
