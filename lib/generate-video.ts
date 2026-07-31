@@ -34,7 +34,6 @@ import {
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, GenLog } from "@/lib/types";
 import { drawAyahFrame, drawBackground } from "@/lib/canva-utils";
-import { ensureFontsReady } from "@/lib/fonts-ready";
 import type {
   WorkerInMessage,
   WorkerOutMessage,
@@ -45,40 +44,31 @@ export { isWebCodecsSupported };
 
 /* ── Constants ───────────────────────────────────────────────── */
 
-const RENDER_FPS = 30;        // Unique frames rendered per second
-const OUTPUT_FPS = 60;        // Encoded output FPS (frame-doubled from RENDER_FPS)
-const FPS = RENDER_FPS;       // Used by buildSegments for frame allocation
-const LEAD_IN_SEC = 0;        // No pre-roll silence — text/audio start together.
+const FPS = 30;
+const LEAD_IN_SEC = 0; // No pre-roll silence — text/audio start together.
 const FALLBACK_DUR = 6;
 const MAX_BG_FRAMES = 900;
 const AUDIO_CONCURRENCY = 6;
 
-/** Full-HD resolutions — always 1080p on every device. */
-const ASPECT_FULL: Record<string, [number, number]> = {
-  "16:9": [1920, 1080],
-  "9:16": [1080, 1920],
-  "1:1":  [1080, 1080],
+const ASPECT: Record<string, [number, number]> = {
+  "16:9": [1280, 720],
+  "9:16": [720, 1280],
+  "1:1": [1080, 1080],
 };
 
 /* ══════════════════════════════════════════════════════════════
-   Device-adaptive quality profile
-   ──────────────────────────────────────────────────────────────
-   Resolution and FPS are always 1080p@60fps on every device.
-   Only bitrate scales down on low-power mobile to keep encode
-   speed fast without sacrificing resolution.
+   Device-adaptive quality profile (unchanged from v7)
 ══════════════════════════════════════════════════════════════ */
 
 export interface DeviceProfile {
   isLowPower: boolean;
   bitrateScale: number;
   latencyMode: "quality" | "realtime";
-  outputFps: number;    // always 60
-  renderFps: number;    // always 30 (unique render rate, frame-doubled to 60)
 }
 
 export function getDeviceProfile(): DeviceProfile {
   if (typeof navigator === "undefined") {
-    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime", outputFps: 60, renderFps: 30 };
+    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime" };
   }
   const ua = navigator.userAgent || "";
   const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
@@ -90,18 +80,15 @@ export function getDeviceProfile(): DeviceProfile {
 
   return {
     isLowPower,
-    bitrateScale: isLowPower ? 0.6 : 1,
+    bitrateScale: isLowPower ? 0.7 : 1,
     latencyMode: "realtime",
-    outputFps: 60,
-    renderFps: 30,
   };
 }
 
 function getOutputResolution(
   platform: (typeof PLATFORMS)[0],
-  _profile: DeviceProfile,
 ): [number, number] {
-  return ASPECT_FULL[platform.aspect] ?? [1080, 1920];
+  return ASPECT[platform.aspect] ?? [720, 1280];
 }
 
 function getVideoBitrate(
@@ -111,11 +98,10 @@ function getVideoBitrate(
 ): number {
   const pixels = cw * ch;
   let base: number;
-  if (pixels >= 1080 * 1920)      base = 6_000_000; // 1080p portrait
-  else if (pixels >= 1920 * 1080) base = 6_000_000; // 1080p landscape
-  else                            base = 4_500_000; // 1080p square
-  // outputFps is always 60 now, so fpsScale is always 2
-  return Math.round(base * profile.bitrateScale * 2);
+  if (pixels >= 1080 * 1080) base = 3_500_000;
+  else if (pixels >= 1280 * 720) base = 3_000_000;
+  else base = 2_500_000;
+  return Math.round(base * profile.bitrateScale);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -218,7 +204,11 @@ async function getBackgroundBytes(
     if (settings.background === "upload" && settings.uploadedVideoFile) {
       return await settings.uploadedVideoFile.arrayBuffer();
     }
-    if ((settings.background === "library" || settings.background === "pexels") && settings.videoUrl) {
+    if (
+      (settings.background === "library" ||
+        settings.background === "pexels") &&
+      settings.videoUrl
+    ) {
       const r = await fetch(settings.videoUrl, { signal });
       if (!r.ok) return null;
       return await r.arrayBuffer();
@@ -246,10 +236,12 @@ async function renderAyahOverlays(
   const canvas = document.createElement("canvas");
   canvas.width = cw;
   canvas.height = ch;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const ctx = canvas.getContext("2d")!;
 
   const isStaticBg =
-    settings.background !== "upload" && settings.background !== "library" && settings.background !== "pexels";
+    settings.background !== "upload" &&
+    settings.background !== "library" &&
+    settings.background !== "pexels";
   const bitmaps: ImageBitmap[] = [];
 
   for (let i = 0; i < prepared.length; i++) {
@@ -262,6 +254,8 @@ async function renderAyahOverlays(
         ctx.fillRect(0, 0, cw, ch);
       }
     }
+    // Video backgrounds: keep the bitmap transparent — the worker draws
+    // the decoded video frame + darkness overlay beneath it.
 
     drawOverlayStyle(ctx, cw, ch, settings.overlayStyle, settings.bgOverlay);
     drawAyahFrame(ctx, canvas, prepared[i].ayah, surah, settings, platform);
@@ -269,7 +263,9 @@ async function renderAyahOverlays(
       drawWatermark(ctx, cw, ch, settings.watermarkText);
     }
 
-    bitmaps.push(await createImageBitmap(canvas, { premultiplyAlpha: "premultiply" }));
+    bitmaps.push(
+      await createImageBitmap(canvas, { premultiplyAlpha: "none" }),
+    );
     onProgress(i + 1, prepared.length);
   }
 
@@ -346,7 +342,9 @@ export function renderFullFrame(
   ctx.clearRect(0, 0, w, h);
 
   const useVideoBg =
-    settings.background === "upload" || settings.background === "library" || settings.background === "pexels";
+    settings.background === "upload" ||
+    settings.background === "library" ||
+    settings.background === "pexels";
   if (useVideoBg) {
     if (bgBitmap) {
       ctx.drawImage(bgBitmap, 0, 0, w, h);
@@ -482,10 +480,12 @@ export async function generateVideo(params: {
   const log = (msg: string, pct: number) => onLog({ msg, pct });
 
   const profile = getDeviceProfile();
-  const [cw, ch] = getOutputResolution(platform, profile);
+  const [cw, ch] = getOutputResolution(platform);
 
   const needsBgVideo =
-    settings.background === "upload" || settings.background === "library" || settings.background === "pexels";
+    settings.background === "upload" ||
+    settings.background === "library" ||
+    settings.background === "pexels";
 
   await acquireWakeLock();
   signal.addEventListener("abort", releaseWakeLock, { once: true });
@@ -559,8 +559,6 @@ export async function generateVideo(params: {
 
     /* ── 3. Render text overlays (main thread, cheap) ───────── */
     log("Rendering text overlays…", 30);
-    // Ensure all fonts are loaded before canvas tries to use them
-    await ensureFontsReady();
     const ayahFrameBitmaps = await renderAyahOverlays(
       prepared,
       surah,
@@ -582,6 +580,11 @@ export async function generateVideo(params: {
     log("Preparing background…", 40);
     const bgVideoBytes = await bgBytesPromise;
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (needsBgVideo && !bgVideoBytes) {
+      throw new Error(
+        "Could not load the selected background video. Please re-select it in Settings or pick a color background, then try again.",
+      );
+    }
 
     /* ── 5. Hand everything off to the Worker. ─────────────────── */
     log("Starting encoder (background thread)…", 42);
@@ -591,12 +594,13 @@ export async function generateVideo(params: {
     const blob = await runWorkerEncode({
       cw,
       ch,
-      renderFps: profile.renderFps,
-      outputFps: profile.outputFps,
+      renderFps: FPS,
+      outputFps: profile.isLowPower ? 30 : 60,
       videoBitrate: getVideoBitrate(cw, ch, profile),
       audioBitrate: 128_000,
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS,
+      frameDurationS: 1 / FPS,
       segments,
       ayahFrameBitmaps,
       bgVideoBytes,
@@ -604,8 +608,9 @@ export async function generateVideo(params: {
       fullAudioTrack: fullTrack,
       transitionStyle: settings.transitionStyle,
       latencyMode: profile.latencyMode,
-      onLog: log,
-      signal,
+      bgOverlayPct: settings.bgOverlay ?? 0,
+      onLog: (msg, pct) => log(msg, pct),
+      signal: signal,
     });
 
     return blob;
@@ -629,6 +634,7 @@ function runWorkerEncode(opts: {
   audioBitrate: number;
   sampleRate: number;
   channels: number;
+  frameDurationS: number;
   segments: WorkerSegment[];
   ayahFrameBitmaps: ImageBitmap[];
   bgVideoBytes: ArrayBuffer | null;
@@ -636,6 +642,7 @@ function runWorkerEncode(opts: {
   fullAudioTrack: Float32Array;
   transitionStyle: "none" | "fade" | "slide" | "scale";
   latencyMode: "quality" | "realtime";
+  bgOverlayPct: number;
   onLog: (msg: string, pct: number) => void;
   signal: AbortSignal;
 }): Promise<Blob> {
@@ -693,6 +700,7 @@ function runWorkerEncode(opts: {
         fullAudioTrack: opts.fullAudioTrack.buffer as ArrayBuffer,
         transitionStyle: opts.transitionStyle,
         latencyMode: opts.latencyMode,
+        bgOverlayPct: opts.bgOverlayPct,
       },
     };
 

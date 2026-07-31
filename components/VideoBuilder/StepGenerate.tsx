@@ -373,7 +373,9 @@ export function StepGenerate({
     const videoEl = bgVideoRef.current;
     if (!videoEl) return;
     const needsVideo =
-      settings.background === "upload" || settings.background === "library";
+      settings.background === "upload" ||
+      settings.background === "library" ||
+      settings.background === "pexels";
     if (needsVideo && videoEl.paused) {
       videoEl.play().catch(() => {});
     }
@@ -526,6 +528,8 @@ export function StepGenerate({
   const platformLabel =
     PLATFORM_META[platform.id as PlatformId]?.label ?? platform.label;
   const ar = locale === "ar";
+  const deviceProfile = getDeviceProfile();
+  const fps = deviceProfile.isLowPower ? 30 : 60;
 
   /* ── Share text ──────────────────────────────────────────── */
   const shareText = useMemo(() => {
@@ -809,8 +813,8 @@ export function StepGenerate({
                     ar ? "المنصة" : "Platform",
                     `${platformLabel} · ${platform.aspect}`,
                   ],
-                  [ar ? "الدقة" : "Resolution", `${encW}×${encH}`],
-                  [ar ? "معدل الإطارات" : "Frame Rate", `${profile.outputFps} fps`],
+                   [ar ? "الدقة" : "Resolution", `${encW}×${encH}`],
+                   [ar ? "معدل الإطارات" : "Frame Rate", `${deviceProfile.isLowPower ? 30 : 60} fps`],
                   [ar ? "الجودة" : "Output", "H.264 MP4 + AAC"],
                   [ar ? "المدة التقريبية" : "Est. Duration", `~${estDur}s`],
                 ] as [string, string][]
@@ -968,9 +972,10 @@ export function StepGenerate({
                   className="w-[3px] rounded-full bg-gold/40 transition-all"
                   style={{
                     height: `${baseHeight}px`,
-                    animation: isGenerating
-                      ? `pulse-wave 1.2s ease-in-out infinite`
-                      : "none",
+                    animationName: isGenerating ? "pulse-wave" : "none",
+                    animationDuration: "1.2s",
+                    animationTimingFunction: "ease-in-out",
+                    animationIterationCount: "infinite",
                     animationDelay: `${i * 0.1}s`,
                   }}
                 />

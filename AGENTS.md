@@ -39,6 +39,7 @@ generate-video.ts          Orchestrator: audio fetch → decode → overlay rend
 - **Frame allocation:** `buildSegments()` uses cumulative time tracking (not per-verse rounding) to prevent audio/video drift on long surahs. Don't switch back to independent per-verse `Math.round`.
 - **`LEAD_IN_SEC = 0`:** Text and audio start at the exact same timestamp. Don't add pre-roll silence.
 - **Verse transitions:** Crossfade — old verse alpha decreases while new verse alpha increases, alphas sum to ~1. Never fade both to zero (that creates the "dark gap" bug).
+- **Video backgrounds:** `"upload"`, `"library"` and `"pexels"` are ALL video modes — any check for one must include all three. Text-overlay bitmaps are always transparent for these (never bake a static bg into them); the worker draws the decoded video frame + `bgOverlay` darkness beneath. A selected video that fails to fetch throws a hard error (never silently emit a black video).
 - **Frame doubling:** Renders 30 unique frames/sec, submits each twice to the encoder for 60fps output. H.264 P-frames make duplicates nearly free. Don't try to render 60 unique frames — it doubles encode time for zero visual gain.
 - **`bgVideoRef` not in rAF deps:** The preview's `useEffect` intentionally excludes `bgVideoRef` and settings from the dependency array. The rAF loop reads ref values instead. Adding them restarts the loop and causes preview stutter.
 

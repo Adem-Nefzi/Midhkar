@@ -37,10 +37,34 @@ export interface Reciter {
 }
 
 export const PLATFORMS = [
-  { id: "youtube", label: "YouTube Shorts", icon: "yt", aspect: "9:16", fontSize: "medium" },
-  { id: "instagram", label: "Instagram Reel", icon: "ig", aspect: "9:16", fontSize: "large" },
-  { id: "facebook", label: "Facebook", icon: "fb", aspect: "1:1", fontSize: "medium" },
-  { id: "tiktok", label: "TikTok", icon: "tt", aspect: "9:16", fontSize: "large" },
+  {
+    id: "youtube",
+    label: "YouTube Shorts",
+    icon: "yt",
+    aspect: "9:16",
+    fontSize: "medium",
+  },
+  {
+    id: "instagram",
+    label: "Instagram Reel",
+    icon: "ig",
+    aspect: "9:16",
+    fontSize: "large",
+  },
+  {
+    id: "facebook",
+    label: "Facebook",
+    icon: "fb",
+    aspect: "1:1",
+    fontSize: "medium",
+  },
+  {
+    id: "tiktok",
+    label: "TikTok",
+    icon: "tt",
+    aspect: "9:16",
+    fontSize: "large",
+  },
 ];
 
 export const TEXT_POSITIONS = [
@@ -62,7 +86,9 @@ export const TEXT_COLORS = [
   { id: "ivory", label: "Ivory", value: "#fffff0" },
 ];
 
-export const ANIMATED_BG = [{ id: "upload", label: "Upload Video", icon: "📁" }];
+export const ANIMATED_BG = [
+  { id: "upload", label: "Upload Video", icon: "📁" },
+];
 
 export const VERSE_PRESETS = [
   { id: "first-3", label: "First 3" },
@@ -77,21 +103,53 @@ const QURAN_FOUNDATION_RECITERS: Record<
   number,
   { englishName: string; name: string; everyayahFolder: string }
 > = {
-  7: { englishName: "Mishary Al Afasy", name: "مشاري العفاسي", everyayahFolder: "Alafasy_128kbps" },
-  4: { englishName: "Abu Bakr Al Shatri", name: "أبو بكر الشاطري", everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps" },
-  3: { englishName: "Nasser Al Qatami", name: "ناصر القطامي", everyayahFolder: "Nasser_Alqatami_128kbps" },
-  5: { englishName: "Hani Ar Rifai", name: "هاني الرفاعي", everyayahFolder: "Hani_Rifai_192kbps" },
-  1: { englishName: "AbdulBaset (Murattal)", name: "عبد الباسط", everyayahFolder: "Abdul_Basit_Murattal_192kbps" },
-  6: { englishName: "Mahmoud Al Husary", name: "محمود الحصري", everyayahFolder: "Husary_128kbps" },
-  10: { englishName: "Saud Al Shuraim", name: "سعود الشريم", everyayahFolder: "Saood_ash-Shuraym_128kbps" },
-  9: { englishName: "Minshawi (Murattal)", name: "المنشاوي", everyayahFolder: "Minshawy_Murattal_128kbps" },
+  7: {
+    englishName: "Mishary Al Afasy",
+    name: "مشاري العفاسي",
+    everyayahFolder: "Alafasy_128kbps",
+  },
+  4: {
+    englishName: "Abu Bakr Al Shatri",
+    name: "أبو بكر الشاطري",
+    everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps",
+  },
+  3: {
+    englishName: "Nasser Al Qatami",
+    name: "ناصر القطامي",
+    everyayahFolder: "Nasser_Alqatami_128kbps",
+  },
+  5: {
+    englishName: "Hani Ar Rifai",
+    name: "هاني الرفاعي",
+    everyayahFolder: "Hani_Rifai_192kbps",
+  },
+  1: {
+    englishName: "AbdulBaset (Murattal)",
+    name: "عبد الباسط",
+    everyayahFolder: "Abdul_Basit_Murattal_192kbps",
+  },
+  6: {
+    englishName: "Mahmoud Al Husary",
+    name: "محمود الحصري",
+    everyayahFolder: "Husary_128kbps",
+  },
+  10: {
+    englishName: "Saud Al Shuraim",
+    name: "سعود الشريم",
+    everyayahFolder: "Saood_ash-Shuraym_128kbps",
+  },
+  9: {
+    englishName: "Minshawi (Murattal)",
+    name: "المنشاوي",
+    everyayahFolder: "Minshawy_Murattal_128kbps",
+  },
 };
 
 /* ── Translation IDs on the Quran Foundation API ─────────────────── */
 const TRANSLATION_IDS: Record<string, number> = {
   en: 131, // Sahih International
   fr: 136, // Hamidullah (French)
-  ar: 0,   // No translation for Arabic
+  ar: 0, // No translation for Arabic
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -99,14 +157,18 @@ async function fetchJson<T>(url: string): Promise<T> {
   try {
     const cached = sessionStorage.getItem(cacheKey);
     if (cached) return JSON.parse(cached) as T;
-  } catch { /* sessionStorage unavailable */ }
+  } catch {
+    /* sessionStorage unavailable */
+  }
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   try {
     sessionStorage.setItem(cacheKey, JSON.stringify(data));
-  } catch { /* quota exceeded — don't block */ }
+  } catch {
+    /* quota exceeded — don't block */
+  }
   return data;
 }
 

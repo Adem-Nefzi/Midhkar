@@ -78,6 +78,8 @@ export type WorkerInMessage =
         fullAudioTrack: ArrayBuffer;
         transitionStyle: "none" | "fade" | "slide" | "scale";
         latencyMode: "quality" | "realtime";
+        /** Darkness overlay on top of the background video, 0–80 (%). */
+        bgOverlayPct: number;
       };
     }
   | { type: "abort" };
@@ -100,7 +102,8 @@ self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
     try {
       await runEncode(msg.payload);
     } catch (err: any) {
-      post({ type: "error", message: err?.message ?? String(err) });
+      console.error("[encode.worker error]", err);
+      post({ type: "error", message: err?.stack || err?.message || String(err) });
     }
   }
 };
@@ -235,6 +238,7 @@ async function runEncode(payload: StartPayload) {
     fullAudioTrack,
     transitionStyle,
     latencyMode,
+    bgOverlayPct,
   } = payload;
 
   const frameDurationS = 1 / outputFps;
@@ -302,19 +306,18 @@ async function runEncode(payload: StartPayload) {
     if (aborted) throw new DOMException("Aborted", "AbortError");
 
     const count = Math.min(chunkFrames, fullTrack.length - offset);
-    const audioDataSegment = fullTrack.subarray(offset, offset + count);
+    const audioDataSegment = fullTrack.slice(offset, offset + count);
 
-    const audioData = new AudioData({
+    const sample = new AudioSample({
       format: "f32-planar",
       sampleRate: sampleRate,
-      numberOfFrames: count,
       numberOfChannels: channels,
-      timestamp: Math.round((offset / sampleRate) * 1_000_000),
+      timestamp: offset / sampleRate,
       data: audioDataSegment,
     });
 
-    await audioSource.add(new AudioSample(audioData));
-    audioData.close();
+    await audioSource.add(sample);
+    sample.close();
 
     chunkIdx++;
     if (chunkIdx % 8 === 0 || chunkIdx === totalChunks) {
@@ -326,6 +329,8 @@ async function runEncode(payload: StartPayload) {
     }
   }
 
+  audioSource.close();
+
   /* ── Wait for background frames (usually already done). ───────── */
   post({ type: "progress", msg: "Finalising background…", pct: 54 });
   const bgBitmaps = await bgFramesPromise;
@@ -334,6 +339,15 @@ async function runEncode(payload: StartPayload) {
     throw new DOMException("Aborted", "AbortError");
   }
   const bgDecodeFailed = !!bgVideoBytes && bgBitmaps.length === 0;
+  const bgDarkenAlpha =
+    bgBitmaps.length > 0 || bgDecodeFailed
+      ? Math.min(0.8, Math.max(0, bgOverlayPct / 100))
+      : 0;
+  if (bgDecodeFailed) {
+    console.error(
+      "[encode.worker] background video bytes were provided but could not be decoded — output will use the fallback background instead.",
+    );
+  }
 
   /* ── Encode video frames ──────────────────────────────────── */
   post({ type: "progress", msg: "Encoding video…", pct: 56 });
@@ -384,6 +398,12 @@ async function runEncode(payload: StartPayload) {
         );
       } else if (bgDecodeFailed) {
         ctx.fillStyle = FALLBACK_BG_COLOR;
+        ctx.fillRect(0, 0, cw, ch);
+      }
+      // Darkness overlay over the video bg (static-color bgs bake this
+      // into their overlay bitmaps on the main thread instead).
+      if (bgDarkenAlpha > 0) {
+        ctx.fillStyle = `rgba(0,0,0,${bgDarkenAlpha})`;
         ctx.fillRect(0, 0, cw, ch);
       }
 
@@ -469,6 +489,8 @@ async function runEncode(payload: StartPayload) {
       }
     }
   }
+
+  videoSource.close();
 
   /* ── Finalize ─────────────────────────────────────────────── */
   post({ type: "progress", msg: "Finalising…", pct: 97 });
