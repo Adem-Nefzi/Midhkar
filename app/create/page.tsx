@@ -21,6 +21,26 @@ export default function CreatePage() {
   return (
     <I18nProvider>
       <main className="relative min-h-screen bg-ink text-parchment antialiased selection:bg-gold/30 selection:text-ink overflow-hidden">
+        {/* Aurora beams — modern luxe ambient */}
+        <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
+          <div
+            className="aurora-beam animate-aurora-drift left-[-15%] top-[-25%] h-[55vmax] w-[55vmax] rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle at 40% 40%, rgba(212,175,55,0.09), transparent 60%)",
+            }}
+          />
+          <div
+            className="aurora-beam animate-aurora-drift right-[-20%] bottom-[-20%] h-[50vmax] w-[50vmax] rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle at 60% 55%, rgba(95,141,110,0.06), transparent 60%)",
+              animationDelay: "-8s",
+              animationDuration: "24s",
+            }}
+          />
+        </div>
+
         {/* Girih tessellation background — hidden on mobile for performance */}
         <div className="absolute inset-0 opacity-[0.12] pointer-events-none hidden sm:block">
           <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">

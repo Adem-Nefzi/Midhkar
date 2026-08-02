@@ -145,10 +145,10 @@ const QURAN_FOUNDATION_RECITERS: Record<
   },
 };
 
-/* ── Translation IDs on the Quran Foundation API ─────────────────── */
+/* ── Translation resource IDs (Quran Foundation API) ─────────────────── */
 const TRANSLATION_IDS: Record<string, number> = {
-  en: 131, // Sahih International
-  fr: 136, // Hamidullah (French)
+  en: 20, // Saheeh International
+  fr: 31, // Muhammad Hamidullah
   ar: 0, // No translation for Arabic
 };
 

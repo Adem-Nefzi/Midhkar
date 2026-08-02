@@ -27,6 +27,8 @@ export interface VideoSettings {
   uploadedVideoFile: File | null;
   videoUrl: string | null;
   videoThumb: string | null;
+  /** Ordered playlist of background videos (library/pexels). index 0 = first. */
+  videoUrls: string[];
   // Effects
   textShadow: boolean;
   bgOverlay: number;         // 0–80 %
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   uploadedVideoFile: null,
   videoUrl: null,
   videoThumb: null,
+  videoUrls: [],
   textShadow: true,
   bgOverlay: 35,
   fontSize: "medium",
@@ -109,6 +112,9 @@ export const ARABIC_FONTS = [
 
 export const LATIN_FONTS = [
   { id: "inter",        name: "Inter",            family: "'Inter', sans-serif" },
+  { id: "poppins",      name: "Poppins",          family: "'Poppins', sans-serif" },
+  { id: "jetbrains",    name: "JetBrains Mono",   family: "'JetBrains Mono', monospace" },
+  { id: "georgia",      name: "Georgia",          family: "'Georgia', 'Times New Roman', serif" },
   { id: "lato",         name: "Lato",             family: "'Lato', sans-serif" },
   { id: "playfair",     name: "Playfair Display", family: "'Playfair Display', serif" },
   { id: "merriweather", name: "Merriweather",     family: "'Merriweather', serif" },

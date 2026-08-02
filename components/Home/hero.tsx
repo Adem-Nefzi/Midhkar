@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { usePointerVars } from "@/components/Reveal";
 
 export function Hero() {
   const { t, dir, locale } = useI18n();
@@ -11,6 +12,7 @@ export function Hero() {
   const containerRef = useRef<HTMLElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [isHovering, setIsHovering] = useState(false);
+  const ctaRef = usePointerVars<HTMLAnchorElement>();
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!containerRef.current) return;
@@ -31,10 +33,38 @@ export function Hero() {
   return (
     <section
       ref={containerRef}
-      className="relative overflow-hidden"
+      className="noise relative overflow-hidden"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
+      {/* Aurora beams — modern luxe drift (behind everything else) */}
+      <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden="true">
+        <div
+          className="aurora-beam animate-aurora-drift left-[-10%] top-[-20%] h-[60vmax] w-[60vmax] rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle at 40% 40%, rgba(212,175,55,0.10), transparent 60%)",
+          }}
+        />
+        <div
+          className="aurora-beam animate-aurora-drift right-[-15%] top-[10%] h-[55vmax] w-[55vmax] rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle at 60% 50%, rgba(95,141,110,0.08), transparent 60%)",
+            animationDelay: "-6s",
+            animationDuration: "22s",
+          }}
+        />
+        <div
+          className="aurora-beam animate-aurora-drift left-[20%] bottom-[-25%] h-[50vmax] w-[50vmax] rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle at 50% 50%, rgba(212,175,55,0.06), transparent 60%)",
+            animationDelay: "-12s",
+            animationDuration: "26s",
+          }}
+        />
+      </div>
       {/* ============================================================
           BASE BACKGROUND
       ============================================================ */}
@@ -357,14 +387,17 @@ export function Hero() {
           <span className="absolute -bottom-3 left-0 right-0 h-px origin-center scale-x-0 animate-draw-line bg-gradient-to-r from-transparent via-gold/60 to-transparent [animation-delay:550ms]" />
         </div>
 
-        {/* Subtitle */}
-        <p className="mt-4 animate-fade-up text-xs uppercase tracking-[0.3em] text-parchment-muted/60 opacity-0 [animation-delay:120ms]">
-          {t("hero.subtitle")}
+        {/* Subtitle — eyebrow badge */}
+        <p className="animate-fade-up mt-4 opacity-0 [animation-delay:120ms]">
+          <span className="glass-soft inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[11px] font-medium uppercase tracking-[0.22em] text-gold-soft/80">
+            <span className="h-1.5 w-1.5 rounded-full bg-gold/90" />
+            {t("hero.subtitle")}
+          </span>
         </p>
 
         {/* Main headline */}
         <h1
-          className="mt-8 animate-fade-up font-display text-4xl font-medium leading-[1.1] text-parchment opacity-0 sm:text-5xl md:text-6xl [animation-delay:220ms]"
+          className="mt-8 animate-fade-up text-shine text-shine-slow font-display text-4xl font-semibold leading-[1.08] tracking-tight opacity-0 sm:text-5xl md:text-6xl [animation-delay:220ms]"
           dangerouslySetInnerHTML={{ __html: t("hero.title") }}
         />
 
@@ -373,22 +406,17 @@ export function Hero() {
           {t("hero.description")}
         </p>
 
-        {/* Quranic verse — illuminated manuscript style */}
+        {/* Quranic verse — modern glass illuminated card */}
         {hasVerse && (
           <blockquote
             dir="rtl"
-            className="mt-10 animate-fade-up relative rounded-sm border-2 border-gold/20 bg-gradient-to-b from-gold/[0.03] to-transparent p-4 sm:p-6 md:p-8 opacity-0 [animation-delay:380ms]"
+            className="glass gradient-border animate-fade-in-scale relative mt-10 rounded-2xl p-6 opacity-0 [animation-delay:380ms] sm:p-8"
           >
-            {/* Ornate corner marks */}
-            <div className="absolute top-0 left-0 h-6 w-6 border-t-2 border-l-2 border-gold/30" />
-            <div className="absolute top-0 right-0 h-6 w-6 border-t-2 border-r-2 border-gold/30" />
-            <div className="absolute bottom-0 left-0 h-6 w-6 border-b-2 border-l-2 border-gold/30" />
-            <div className="absolute bottom-0 right-0 h-6 w-6 border-b-2 border-r-2 border-gold/30" />
-            {/* Inner corner accents */}
-            <div className="absolute top-2 left-2 h-3 w-3 border-t border-l border-gold/15" />
-            <div className="absolute top-2 right-2 h-3 w-3 border-t border-r border-gold/15" />
-            <div className="absolute bottom-2 left-2 h-3 w-3 border-b border-l border-gold/15" />
-            <div className="absolute bottom-2 right-2 h-3 w-3 border-b border-r border-gold/15" />
+            {/* Corner accents */}
+            <div className="absolute top-0 left-0 h-6 w-6 rounded-tl-2xl border-t-2 border-l-2 border-gold/30" />
+            <div className="absolute top-0 right-0 h-6 w-6 rounded-tr-2xl border-t-2 border-r-2 border-gold/30" />
+            <div className="absolute bottom-0 left-0 h-6 w-6 rounded-bl-2xl border-b-2 border-l-2 border-gold/30" />
+            <div className="absolute bottom-0 right-0 h-6 w-6 rounded-br-2xl border-b-2 border-r-2 border-gold/30" />
 
             <p
               lang="ar"
@@ -399,7 +427,7 @@ export function Hero() {
             </p>
             <cite
               dir="ltr"
-              className="mt-4 block text-sm not-italic text-gold/60 tracking-wide"
+              className="mt-4 block text-sm not-italic tracking-wide text-gold/70"
             >
               {t("hero.verseRef")}
             </cite>
@@ -407,14 +435,33 @@ export function Hero() {
         )}
 
         {/* CTA Buttons */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4 animate-fade-up opacity-0 [animation-delay:460ms]">
+        <div className="animate-fade-up mt-12 flex flex-wrap items-center justify-center gap-4 opacity-0 [animation-delay:460ms]">
           <Link
+            ref={ctaRef}
             href="/create"
-            className="group relative inline-block overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gold/20"
+            className="btn-luxe group relative rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink shadow-lg shadow-gold/25 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/35"
           >
-            <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative">{t("hero.ctaPrimary")}</span>
           </Link>
+          <a
+            href="#features"
+            className="glass-soft group inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-sm font-medium text-parchment transition-all duration-300 hover:border-gold/40 hover:text-gold-soft"
+          >
+            {t("hero.ctaSecondary") as string}
+            <svg
+              className="h-4 w-4 animate-scroll-cue text-gold/70"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
+            </svg>
+          </a>
         </div>
       </div>
     </section>

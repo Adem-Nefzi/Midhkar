@@ -1,24 +1,34 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Inter, Amiri } from "next/font/google";
+import { Fraunces, Inter, Amiri, Noto_Naskh_Arabic } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
-  weight: ["500", "600"],
+  weight: ["500", "600", "700"],
   variable: "--font-display",
+  display: "swap",
 });
 
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
+  display: "swap",
 });
 
 const amiri = Amiri({
   subsets: ["arabic"],
   weight: ["400", "700"],
   variable: "--font-arabic",
+  display: "swap",
+});
+
+const naskh = Noto_Naskh_Arabic({
+  subsets: ["arabic"],
+  weight: ["400", "700"],
+  variable: "--font-naskh",
+  display: "swap",
 });
 
 const BASE_URL = "https://midhkar.vercel.app";
@@ -141,7 +151,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${inter.variable} ${amiri.variable}`}
+      className={`${fraunces.variable} ${inter.variable} ${amiri.variable} ${naskh.variable}`}
     >
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />

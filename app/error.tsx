@@ -2,14 +2,17 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { I18nProvider, useI18n } from "@/lib/i18n";
 
-export default function Error({
+function ErrorContent({
   error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { t } = useI18n();
+
   useEffect(() => {
     console.error("[midhkar] app error:", error);
   }, [error]);
@@ -49,23 +52,22 @@ export default function Error({
 
         <div className="flex items-center justify-center gap-3 mb-3">
           <div className="h-px w-8 bg-gradient-to-r from-transparent to-gold/40" />
-          <span className="text-gold/50 text-xs uppercase tracking-[0.3em]">Something went wrong</span>
+          <span className="text-gold/50 text-xs uppercase tracking-[0.3em]">{t("error.eyebrow")}</span>
           <div className="h-px w-8 bg-gradient-to-l from-transparent to-gold/40" />
         </div>
 
         <h1 className="font-display text-3xl sm:text-4xl font-medium text-parchment mb-3">
-          An Unexpected Error Occurred
+          {t("error.title")}
         </h1>
 
         <p className="text-parchment-muted text-sm max-w-md mx-auto mb-6 leading-relaxed">
-          The app encountered an unexpected issue. You can try again — if the problem persists,
-          please refresh the page or return home.
+          {t("error.body")}
         </p>
 
         {/* Error details (collapsed) */}
         <details className="mb-6 max-w-md mx-auto">
           <summary className="cursor-pointer text-xs text-parchment-muted/40 hover:text-gold/60 transition text-center">
-            Technical details
+            {t("error.details")}
           </summary>
           <pre className="mt-2 rounded-lg border border-gold/10 bg-ink-light/40 p-3 text-[10px] text-red-400/60 text-left overflow-x-auto whitespace-pre-wrap">
             {error.message || "Unknown error"}
@@ -79,13 +81,13 @@ export default function Error({
             className="group relative overflow-hidden rounded-full bg-gold px-8 py-3 text-sm font-semibold text-ink transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 btn-press"
           >
             <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-            <span className="relative">Try Again</span>
+            <span className="relative">{t("error.tryAgain")}</span>
           </button>
           <Link
             href="/"
             className="rounded-full border border-gold/30 px-8 py-3 text-sm text-gold hover:bg-gold/10 transition-all btn-press"
           >
-            Return Home
+            {t("error.returnHome")}
           </Link>
         </div>
 
@@ -94,5 +96,19 @@ export default function Error({
         </p>
       </div>
     </main>
+  );
+}
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  return (
+    <I18nProvider>
+      <ErrorContent error={error} reset={reset} />
+    </I18nProvider>
   );
 }

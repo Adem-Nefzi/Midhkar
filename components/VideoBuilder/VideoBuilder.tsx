@@ -26,6 +26,7 @@ import {
   generateVideo,
   prefetchAudio,
   clearAudioCache,
+  estimateTotalDurationSec,
 } from "@/lib/generate-video";
 import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
 import { StepSurah } from "./StepSurah";
@@ -62,47 +63,66 @@ function StepIndicator({ step, locale }: { step: number; locale: string }) {
   ];
   return (
     <nav
-      className="mb-12 flex items-center justify-center gap-2 glass rounded-full px-6 py-3"
+      className="glass mx-auto mb-12 flex w-fit items-center justify-center gap-1.5 rounded-full px-3 py-2.5 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5)] sm:gap-2 sm:px-5"
       aria-label="Progress"
     >
-      {steps.map((s, i) => (
-        <div key={s.num} className="flex items-center gap-2">
-          <div className="flex flex-col items-center">
-            <div
-              className={`flex h-9 w-9 items-center justify-center rounded-full border text-xs font-semibold transition-all duration-300 ${step >= s.num ? "border-gold/40 bg-gold/15 text-gold shadow-sm shadow-gold/10" : "border-gold/10 bg-ink-light/30 text-parchment-muted"}`}
-              aria-current={step === s.num ? "step" : undefined}
-            >
-              {step > s.num ? (
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-              ) : (
-                s.num
-              )}
+      {steps.map((s, i) => {
+        const active = step === s.num;
+        const done = step > s.num;
+        return (
+          <div key={s.num} className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-full border text-[11px] font-semibold transition-all duration-500 ${
+                  done
+                    ? "border-gold/50 bg-gold text-ink shadow-md shadow-gold/30"
+                    : active
+                      ? "border-gold/50 bg-gold/15 text-gold shadow-[0_0_16px_rgba(212,175,55,0.25)]"
+                      : "border-gold/10 bg-ink-light/30 text-parchment-muted/60"
+                }`}
+                aria-current={active ? "step" : undefined}
+              >
+                {done ? (
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                ) : (
+                  s.num
+                )}
+              </div>
+              <span
+                className={`hidden text-[11px] font-medium transition-colors sm:block ${
+                  active
+                    ? "text-gold"
+                    : done
+                      ? "text-gold-soft/70"
+                      : "text-parchment-muted/50"
+                }`}
+              >
+                {s.label}
+              </span>
             </div>
-            <span
-              className={`mt-1 text-[10px] ${step >= s.num ? "text-gold/60" : "text-parchment-muted/40"}`}
-            >
-              {s.label}
-            </span>
+            {i < steps.length - 1 && (
+              <div className="relative mx-1 h-px w-6 overflow-hidden bg-gold/10 sm:w-10">
+                <div
+                  className="h-full bg-gradient-to-r from-gold/60 to-gold/20 transition-all duration-700"
+                  style={{ width: done ? "100%" : "0%" }}
+                />
+              </div>
+            )}
           </div>
-          {i < steps.length - 1 && (
-            <div
-              className={`w-8 sm:w-12 h-px ${step > s.num ? "bg-gold/30" : "bg-gold/10"}`}
-            />
-          )}
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }
@@ -151,6 +171,11 @@ export function VideoBuilder() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [previewIdx, setPreviewIdx] = useState(0);
+
+  // Accurate total output length — decoded audio durations + verse spacing.
+  const [totalDurationSec, setTotalDurationSec] = useState<number | null>(null);
+  const [durationLoading, setDurationLoading] = useState(false);
+  const durationCtrlRef = useRef<AbortController | null>(null);
 
   // Fix: was hardcoded to `null` when passed to StepSettings, so the
   // (already-built) invalid-file / oversized-file UI in StepSettings
@@ -407,7 +432,7 @@ export function VideoBuilder() {
 
     const src =
       settings.background === "library" || settings.background === "pexels"
-        ? settings.videoUrl
+        ? (settings.videoUrls?.[0] ?? settings.videoUrl)
         : settings.uploadedVideoUrl;
     if (!src || loadedBgSrcRef.current === src) return;
 
@@ -417,7 +442,12 @@ export function VideoBuilder() {
     bgEl.loop = true;
     bgEl.preload = "auto";
     bgEl.load();
-  }, [settings.background, settings.videoUrl, settings.uploadedVideoUrl]);
+  }, [
+    settings.background,
+    settings.videoUrl,
+    settings.videoUrls,
+    settings.uploadedVideoUrl,
+  ]);
 
   const handleGenerate = useCallback(async () => {
     if (!selectedSurah || !selectedReciter || selectedAyahsData.length === 0)
@@ -491,6 +521,44 @@ export function VideoBuilder() {
       clearAudioCache();
     };
   }, [selectedReciter, selectedSurah, selectedAyahsData]);
+
+  // Accurate total video length: decode real audio durations for the selection.
+  // Re-runs whenever verses/reciter/verse-spacing change; cancelled on change/unmount.
+  useEffect(() => {
+    durationCtrlRef.current?.abort();
+    const hasSelection =
+      !!selectedReciter && !!selectedSurah && selectedAyahsData.length > 0;
+    if (!hasSelection) {
+      setTotalDurationSec(null);
+      setDurationLoading(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    durationCtrlRef.current = ctrl;
+    setDurationLoading(true);
+    estimateTotalDurationSec({
+      ayahs: selectedAyahsData,
+      reciter: selectedReciter,
+      surah: selectedSurah,
+      verseSpacingSec: settings.verseSpacing ?? 0,
+      signal: ctrl.signal,
+    })
+      .then((sec) => {
+        if (!ctrl.signal.aborted) setTotalDurationSec(sec);
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setTotalDurationSec(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setDurationLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [
+    selectedReciter,
+    selectedSurah,
+    selectedAyahsData,
+    settings.verseSpacing,
+  ]);
 
   /* ── Draft auto-save ──────────────────────────────────────── */
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -647,7 +715,7 @@ export function VideoBuilder() {
             </div>
             <div className="h-px w-16 bg-gradient-to-l from-transparent to-gold/40" />
           </div>
-          <h1 className="font-display text-4xl font-medium text-parchment sm:text-5xl">
+          <h1 className="text-shine text-shine-slow font-display text-4xl font-semibold tracking-tight sm:text-5xl">
             {locale === "ar" ? "منشئ الفيديو القرآني" : "Quran Video Studio"}
           </h1>
           <p className="mt-3 text-parchment-muted max-w-md mx-auto text-sm">
@@ -706,6 +774,8 @@ export function VideoBuilder() {
             surahNumber={selectedSurah.number}
             reciterIdentifier={selectedReciter?.identifier ?? null}
             reciters={reciters}
+            totalDurationSec={totalDurationSec}
+            durationLoading={durationLoading}
           />
         )}
 
@@ -731,6 +801,8 @@ export function VideoBuilder() {
             onBack={() => setStep(2)}
             onNext={() => setStep(4)}
             locale={locale}
+            totalDurationSec={totalDurationSec}
+            durationLoading={durationLoading}
           />
         )}
 

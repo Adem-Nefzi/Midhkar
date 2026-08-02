@@ -81,6 +81,7 @@ const translations = {
       description:
         "Choose a surah, a reciter, and a few verses. Midhkar turns them into a short video you can post anywhere — no editing skills, no cost, ever.",
       ctaPrimary: "Start creating",
+      ctaSecondary: "See how it works",
       verse:
         "And We have certainly made the Qur'an easy to remember. So is there anyone who will be mindful?",
       verseRef: "— Surah Al-Qamar, 54:17",
@@ -120,6 +121,22 @@ const translations = {
       tagline: "Spreading the words of Allah, one video at a time.",
       rights: "All rights reserved. Made for the sake of Allah ﷻ.",
     },
+    error: {
+      eyebrow: "Something went wrong",
+      title: "An unexpected error occurred",
+      body: "The app encountered an unexpected issue. You can try again — if the problem persists, please refresh the page or return home.",
+      details: "Technical details",
+      tryAgain: "Try again",
+      returnHome: "Return home",
+    },
+    notFound: {
+      eyebrow: "Lost path",
+      subtitle: "The page you seek has wandered off the path.\nLet us guide you back, by the will of Allah.",
+      returnHome: "Return home",
+      createCta: "Create a video",
+      reference: "\"And He taught you that which you knew not. And the favor of Allah upon you is immense.\" — Surah An-Nisa 4:113",
+    },
+    loading: "Loading",
   },
   fr: {
     nav: {
@@ -133,6 +150,7 @@ const translations = {
       description:
         "Choisissez une sourate, un récitateur et quelques versets. Midhkar les transforme en une courte vidéo que vous pouvez publier partout — sans compétences en montage, sans frais, jamais.",
       ctaPrimary: "Commencer à créer",
+      ctaSecondary: "Voir comment ça marche",
       verse:
         "Nous avons certes rendu le Coran facile pour la méditation. Y a-t-il donc quelqu'un pour y réfléchir ?",
       verseRef: "— Sourate Al-Qamar, 54:17",
@@ -172,6 +190,22 @@ const translations = {
       tagline: "Diffuser les paroles d'Allah, une vidéo à la fois.",
       rights: "Tous droits réservés. Fait pour la cause d'Allah ﷻ.",
     },
+    error: {
+      eyebrow: "Quelque chose s'est mal passé",
+      title: "Une erreur inattendue est survenue",
+      body: "L'application a rencontré un problème inattendu. Vous pouvez réessayer — si le problème persiste, actualisez la page ou revenez à l'accueil.",
+      details: "Détails techniques",
+      tryAgain: "Réessayer",
+      returnHome: "Retour à l'accueil",
+    },
+    notFound: {
+      eyebrow: "Chemin perdu",
+      subtitle: "La page que vous cherchez s'est égarée.\nLaissez-nous vous guider, par la volonté d'Allah.",
+      returnHome: "Retour à l'accueil",
+      createCta: "Créer une vidéo",
+      reference: "\"Et Il t'a enseigné ce que tu ne savais pas. Et la grâce d'Allah sur toi est immense.\" — Sourate An-Nisa 4:113",
+    },
+    loading: "Chargement",
   },
   ar: {
     nav: {
@@ -182,6 +216,7 @@ const translations = {
       subtitle: "مشروع صدقة جارية — مجاني، دائماً",
       title: "أعطِ القرآن صوتاً يستحق المشاركة.",
       ctaPrimary: "ابدأ الإنشاء",
+      ctaSecondary: "شاهد كيف يعمل",
       description:
         "اختر سورة، وقارئاً، وآيات. يحولها مذكر إلى فيديو قصير يمكنك نشره في أي مكان — بدون مهارات تحرير، وبدون تكلفة، أبداً.",
       verse: "وَلَقَدْ يَسَّرْنَا الْقُرْآنَ لِلذِّكْرِ فَهَلْ مِن مُّدَّكِرٍ",
@@ -222,5 +257,21 @@ const translations = {
       tagline: "نشر كلمات الله، فيديو تلو الآخر.",
       rights: "جميع الحقوق محفوظة. صُنع لوجه الله ﷻ.",
     },
+    error: {
+      eyebrow: "حدث خطأ ما",
+      title: "حدث خطأ غير متوقع",
+      body: "واجه التطبيق مشكلة غير متوقعة. يمكنك المحاولة مرة أخرى — إذا استمرت المشكلة، حدّث الصفحة أو عُد إلى الصفحة الرئيسية.",
+      details: "تفاصيل تقنية",
+      tryAgain: "حاول مجدداً",
+      returnHome: "العودة للرئيسية",
+    },
+    notFound: {
+      eyebrow: "مسار مفقود",
+      subtitle: "الصفحة التي تبحث عنها ضلّت عن المسار.\nدعنا نعيدك إليها، بإذن الله.",
+      returnHome: "العودة للرئيسية",
+      createCta: "أنشئ فيديو",
+      reference: "﴿وَعَلَّمَكَ مَا لَمْ تَكُنْ تَعْلَمُ ۚ وَكَانَ فَضْلُ اللَّهِ عَلَيْكَ عَظِيمًا﴾ — سورة النساء، ١١٣",
+    },
+    loading: "جاري التحميل",
   },
 };

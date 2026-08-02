@@ -6,39 +6,46 @@ import Link from "next/link";
 export function Footer() {
   const { t, locale } = useI18n();
   return (
-    <footer className="relative overflow-hidden border-t-2 border-gold/15 bg-ink">
-      {/* Subtle geometric pattern */}
-      <div className="absolute inset-0 opacity-[0.02]">
-        <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern
-              id="footer-pattern"
-              x="0"
-              y="0"
-              width="60"
-              height="60"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M30,0 L33,27 L60,30 L33,33 L30,60 L27,33 L0,30 L27,27 Z"
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="0.3"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#footer-pattern)" />
-        </svg>
+    <footer className="relative overflow-hidden border-t border-gold/10 bg-ink">
+      {/* Ambient top glow */}
+      <div className="absolute top-0 left-1/2 h-px w-2/3 -translate-x-1/2 bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
+      <div className="absolute left-1/2 top-0 h-32 w-[40rem] -translate-x-1/2 bg-gold/[0.04] blur-[60px] pointer-events-none" />
+
+      {/* Bismillah marquee */}
+      <div
+        className="relative overflow-hidden border-b border-gold/8 py-5 [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]"
+        aria-hidden="true"
+        dir="rtl"
+      >
+        <div className="marquee gap-10 [--marquee-duration:40s]">
+          {Array.from({ length: 2 }).map((_, dup) => (
+            <div key={dup} className="flex shrink-0 items-center gap-10">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <span key={i} className="flex shrink-0 items-center gap-10">
+                  <span
+                    className="font-arabic text-lg text-gold/35 whitespace-nowrap"
+                    style={{ fontFamily: "'Amiri', serif" }}
+                  >
+                    بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+                  </span>
+                  <svg
+                    className="h-3 w-3 text-gold/25"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" />
+                  </svg>
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Top gold accent line */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 h-px w-1/2 bg-gradient-to-r from-transparent via-gold/30 to-transparent" />
-
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-16">
-        {/* Main footer content */}
+      <div className="relative z-10 mx-auto max-w-6xl px-6 py-14">
         <div className="flex flex-col items-center text-center">
-          {/* Logo with glow */}
-          <Link href="/" className="group flex items-center gap-3 mb-8">
+          {/* Logo */}
+          <Link href="/" className="group flex items-center gap-3">
             <svg
               viewBox="0 0 32 32"
               className="h-7 w-7 transition-transform duration-700 group-hover:rotate-180"
@@ -49,46 +56,32 @@ export function Footer() {
                 strokeWidth="1.2"
                 className="stroke-gold"
               />
-              <circle cx="16" cy="16" r="2.5" className="fill-gold/40" />
+              <circle cx="16" cy="16" r="2.5" className="fill-gold/50" />
             </svg>
-            <span className="font-display text-xl text-parchment font-semibold tracking-tight">
+            <span className="font-display text-xl font-semibold tracking-tight text-parchment transition-colors group-hover:text-gold-soft">
               Midhkar
             </span>
           </Link>
 
-          {/* Tagline with ornament */}
-          <div className="flex items-center justify-center gap-4 mb-6">
-            <div className="h-px w-12 bg-gradient-to-r from-transparent to-gold/30" />
-            <svg
-              className="h-4 w-4 text-gold/40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-            >
-              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" />
-            </svg>
-            <div className="h-px w-12 bg-gradient-to-l from-transparent to-gold/30" />
-          </div>
-
-          <p className="text-parchment-muted/80 text-base max-w-md mb-8 leading-relaxed">
+          <p className="mt-6 max-w-md text-[15px] leading-relaxed text-parchment-muted/75">
             {t("footer.tagline") as string}
           </p>
-          {/* Decorative divider */}
-          <div className="flex items-center gap-3 mb-8">
-            <div className="h-px w-20 bg-gradient-to-r from-transparent to-gold/20" />
+
+          {/* Divider */}
+          <div className="mt-8 flex items-center gap-3">
+            <div className="h-px w-20 bg-gradient-to-r from-transparent to-gold/25" />
             <svg
-              className="h-3 w-3 text-gold/30"
+              className="h-3 w-3 text-gold/40"
               viewBox="0 0 24 24"
               fill="currentColor"
             >
               <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" />
             </svg>
-            <div className="h-px w-20 bg-gradient-to-l from-transparent to-gold/20" />
+            <div className="h-px w-20 bg-gradient-to-l from-transparent to-gold/25" />
           </div>
 
-          {/* Copyright */}
-          <p className="text-xs text-parchment-muted/40 tracking-wide">
+          {/* Colophon */}
+          <p className="mt-8 text-xs tracking-wide text-parchment-muted/45">
             &copy; {new Date().getFullYear()} Midhkar.{" "}
             {t("footer.rights") as string}
           </p>

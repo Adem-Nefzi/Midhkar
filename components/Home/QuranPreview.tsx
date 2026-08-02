@@ -123,22 +123,15 @@ export function QuranPreview() {
           <div
             className={`${visible ? "opacity-100 translate-x-0" : isRTL ? "opacity-0 translate-x-8" : "opacity-0 -translate-x-8"} transition-all duration-1000`}
           >
-            {/* Eyebrow with ornament — brighter */}
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-10 bg-gradient-to-r from-gold/50 to-transparent" />
-              <svg
-                className="h-3 w-3 text-gold/50"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
-                <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" />
-              </svg>
-              <p className="text-xs uppercase tracking-[0.25em] text-gold/80">
+            {/* Eyebrow — modern badge */}
+            <div className="mb-5 flex items-center gap-3">
+              <span className="glass-soft inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-gold-soft/85">
+                <span className="h-1 w-1 rounded-full bg-gold/90" />
                 {t("quran.eyebrow") as string}
-              </p>
+              </span>
             </div>
 
-            <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl md:text-5xl leading-tight mb-6">
+            <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl md:text-5xl leading-[1.12] tracking-tight mb-6">
               {locale === "ar" ? (
                 <span
                   style={{ fontFamily: "'Amiri', 'Scheherazade New', serif" }}
@@ -147,17 +140,18 @@ export function QuranPreview() {
                 </span>
               ) : (
                 <>
-                  Light upon <span className="text-gold">light</span>
+                  Light upon{" "}
+                  <span className="text-shine text-shine-slow">light</span>
                 </>
               )}
             </h2>
 
-            <p className="text-lg leading-relaxed text-parchment-muted mb-8">
+            <p className="text-lg leading-relaxed text-parchment-muted mb-7 max-w-lg">
               {t("quran.description") as string}
             </p>
 
             <p
-              className="text-sm text-gold/80 mb-8 tracking-wide"
+              className="text-sm text-gold/85 mb-9 tracking-wide"
               style={{ fontFamily: "'Amiri', serif" }}
             >
               {t("quran.ref") as string}
@@ -165,11 +159,11 @@ export function QuranPreview() {
 
             <Link
               href="/create"
-              className="group inline-flex items-center gap-2 rounded-full border-2 border-gold/40 bg-gold/10 px-6 py-3 text-sm text-gold transition-all hover:bg-gold/20 hover:border-gold/60"
+              className="btn-luxe group inline-flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-6 py-3 text-sm font-semibold text-gold transition-all duration-300 hover:border-gold/70 hover:bg-gold/20 hover:shadow-lg hover:shadow-gold/15 hover:-translate-y-0.5"
             >
               {t("quran.cta") as string}
               <svg
-                className={`h-4 w-4 transition-transform group-hover:translate-x-0.5 ${isRTL ? "rotate-180 group-hover:-translate-x-0.5" : ""}`}
+                className={`h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 ${isRTL ? "rotate-180 group-hover:-translate-x-0.5" : ""}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -191,11 +185,11 @@ export function QuranPreview() {
           <div
             className={`relative ${visible ? "opacity-100 translate-x-0" : isRTL ? "opacity-0 -translate-x-8" : "opacity-0 translate-x-8"} transition-all duration-1000 delay-200`}
           >
-            {/* Outer glow — brighter */}
-            <div className="absolute -inset-6 rounded-sm bg-gold/[0.05] blur-2xl" />
-            <div className="absolute -inset-3 rounded-sm bg-gold/[0.03] blur-xl" />
+            {/* Outer glow */}
+            <div className="absolute -inset-8 rounded-[2rem] bg-gold/[0.07] blur-3xl" />
+            <div className="absolute -inset-4 rounded-3xl bg-gold/[0.04] blur-xl" />
 
-            <div className="relative rounded-sm border-2 border-gold/30 bg-gradient-to-b from-ink-light/70 via-ink/90 to-ink-light/70 p-8 sm:p-14 overflow-hidden">
+            <div className="gradient-border glass-strong noise relative overflow-hidden rounded-3xl p-8 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] sm:p-14">
               {/* Triple manuscript border frame — brighter */}
               <div className="absolute inset-2 border border-gold/20" />
               <div className="absolute inset-3 border border-gold/12" />

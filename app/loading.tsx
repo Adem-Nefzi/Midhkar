@@ -1,4 +1,10 @@
-export default function Loading() {
+"use client";
+
+import { I18nProvider, useI18n } from "@/lib/i18n";
+
+function LoadingContent() {
+  const { t } = useI18n();
+
   return (
     <main className="relative min-h-screen bg-ink flex items-center justify-center overflow-hidden">
       {/* Girih pattern */}
@@ -36,11 +42,19 @@ export default function Loading() {
         <div className="flex items-center gap-2">
           <div className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" />
           <span className="text-gold/60 text-xs uppercase tracking-[0.3em] font-medium">
-            Loading
+            {t("loading")}
           </span>
           <div className="h-1.5 w-1.5 rounded-full bg-gold animate-pulse" style={{ animationDelay: "0.2s" }} />
         </div>
       </div>
     </main>
+  );
+}
+
+export default function Loading() {
+  return (
+    <I18nProvider>
+      <LoadingContent />
+    </I18nProvider>
   );
 }

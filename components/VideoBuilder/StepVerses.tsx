@@ -30,6 +30,8 @@ interface Props {
   surahNumber: number;
   reciterIdentifier: string | null;
   reciters: Reciter[];
+  totalDurationSec: number | null;
+  durationLoading: boolean;
 }
 
 export function StepVerses({
@@ -46,10 +48,18 @@ export function StepVerses({
   surahNumber,
   reciterIdentifier,
   reciters,
+  totalDurationSec,
+  durationLoading,
 }: Props) {
   const [query, setQuery] = useState("");
   const [hoveredAyah, setHoveredAyah] = useState<number | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const fmtDur = (sec: number) => {
+    const s = Math.round(sec);
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, "0")}`;
+  };
 
   useEffect(() => {
     if (hoveredAyah === null || !reciterIdentifier) {
@@ -184,6 +194,26 @@ export function StepVerses({
                 ({sortedSelected[0]}–{sortedSelected[sortedSelected.length - 1]})
               </span>
             )}
+            {reciterIdentifier &&
+              (totalDurationSec !== null || durationLoading) && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/10 px-3 py-0.5 text-xs font-semibold text-gold">
+                  <svg
+                    className="h-3 w-3"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path strokeLinecap="round" d="M12 6v6l4 2" />
+                  </svg>
+                  {durationLoading
+                    ? "…"
+                    : totalDurationSec !== null
+                      ? `${locale === "ar" ? "المدة" : locale === "fr" ? "Durée" : "Length"} ≈ ${fmtDur(totalDurationSec)}`
+                      : ""}
+                </span>
+              )}
           </span>
         </div>
       )}

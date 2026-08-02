@@ -34,6 +34,7 @@ import {
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, GenLog } from "@/lib/types";
 import { drawAyahFrame, drawBackground } from "@/lib/canva-utils";
+import { ensureFontsReady } from "./fonts-ready";
 import type {
   WorkerInMessage,
   WorkerOutMessage,
@@ -171,6 +172,52 @@ export function clearAudioCache(): void {
   _audioCache.clear();
 }
 
+/**
+ * Total length (seconds) of the generated video for the given verse selection:
+ * sum of each ayah's actual decoded audio duration + per-ayah trailing spacing.
+ * Decodes audio (concurrent, cache-aware). Returns null while unknown/aborted.
+ */
+export async function estimateTotalDurationSec({
+  ayahs,
+  reciter,
+  surah,
+  verseSpacingSec,
+  signal,
+}: {
+  ayahs: Ayah[];
+  reciter: Reciter;
+  surah: Surah;
+  verseSpacingSec: number;
+  signal?: AbortSignal;
+}): Promise<number | null> {
+  if (!ayahs.length) return 0;
+  try {
+    const durations = await parallelMap(
+      ayahs,
+      async (ayah) => {
+        if (signal?.aborted) return 0;
+        const key = reciter.quranApiNo
+          ? audioCacheKey(reciter.quranApiNo, surah.number, ayah.numberInSurah)
+          : "";
+        let samples = key ? (_audioCache.get(key) ?? null) : null;
+        if (!samples) {
+          const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
+          const raw = await fetchAudioBuffer(urls, signal);
+          samples = raw ? await decodeAndResample(raw) : null;
+        }
+        if (!samples) return FALLBACK_DUR;
+        return samples.length / SAMPLE_RATE;
+      },
+      AUDIO_CONCURRENCY,
+    );
+    if (signal?.aborted) return null;
+    const speech = durations.reduce((a, b) => a + b, 0);
+    return speech + ayahs.length * verseSpacingSec;
+  } finally {
+    releaseAudioContext();
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════
    Wake Lock (unchanged)
 ══════════════════════════════════════════════════════════════ */
@@ -196,28 +243,57 @@ function releaseWakeLock(): void {
    Background video: fetch raw bytes only (main thread) — unchanged
 ══════════════════════════════════════════════════════════════ */
 
-async function getBackgroundBytes(
-  settings: VideoSettings,
+/* Fetch raw bytes of ONE background video. Returns null on any failure. */
+async function fetchVideoBytes(
+  url: string,
   signal: AbortSignal,
 ): Promise<ArrayBuffer | null> {
   try {
-    if (settings.background === "upload" && settings.uploadedVideoFile) {
-      return await settings.uploadedVideoFile.arrayBuffer();
+    const r = await fetch(url, { signal });
+    if (!r.ok) return null;
+    return await r.arrayBuffer();
+  } catch (err) {
+    if ((err as any)?.name === "AbortError" || signal.aborted) return null;
+    console.warn("[fetchVideoBytes] failed:", err);
+    return null;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BACKGROUND PLAYLIST — ordered list of bytes, one per selected video.
+   Upload mode: exactly one (the File). Library/Pexels: 1..N selected videoUrls.
+   The worker decodes them all and crossfades between them in order.
+══════════════════════════════════════════════════════════════ */
+async function getBackgroundBytesList(
+  settings: VideoSettings,
+  signal: AbortSignal,
+): Promise<ArrayBuffer[]> {
+  try {
+    if (settings.background === "upload") {
+      if (!settings.uploadedVideoFile) return [];
+      return [await settings.uploadedVideoFile.arrayBuffer()];
     }
-    if (
-      (settings.background === "library" ||
-        settings.background === "pexels") &&
-      settings.videoUrl
-    ) {
-      const r = await fetch(settings.videoUrl, { signal });
-      if (!r.ok) return null;
-      return await r.arrayBuffer();
+    if (settings.background === "library" || settings.background === "pexels") {
+      // Prefer the ordered playlist; fall back to the legacy single videoUrl.
+      const urls =
+        settings.videoUrls && settings.videoUrls.length
+          ? settings.videoUrls
+          : settings.videoUrl
+            ? [settings.videoUrl]
+            : [];
+      if (!urls.length) return [];
+      // Fetch all in parallel; keep order. Drop failed ones (never emit null).
+      const buffers = await Promise.all(
+        urls.map((u) => fetchVideoBytes(u, signal)),
+      );
+      if (signal.aborted) return [];
+      return buffers.filter((b): b is ArrayBuffer => b !== null);
     }
   } catch (err) {
-    if (signal.aborted) return null;
-    console.warn("[getBackgroundBytes] failed:", err);
+    if (signal.aborted) return [];
+    console.warn("[getBackgroundBytesList] failed:", err);
   }
-  return null;
+  return [];
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -491,11 +567,11 @@ export async function generateVideo(params: {
   signal.addEventListener("abort", releaseWakeLock, { once: true });
 
   try {
-    /* ── 1a. Kick off background bytes fetch immediately — runs
+    /* ── 1a. Kick off background playlist fetch immediately — runs
        concurrently with audio download/decode below. ──────────── */
-    const bgBytesPromise: Promise<ArrayBuffer | null> = needsBgVideo
-      ? getBackgroundBytes(settings, signal)
-      : Promise.resolve(null);
+    const bgBytesPromise: Promise<ArrayBuffer[]> = needsBgVideo
+      ? getBackgroundBytesList(settings, signal)
+      : Promise.resolve([]);
 
     /* ── 1b. Fetch + decode + resample audio (concurrent) ───── */
     log("Downloading & decoding audio…", 5);
@@ -559,6 +635,7 @@ export async function generateVideo(params: {
 
     /* ── 3. Render text overlays (main thread, cheap) ───────── */
     log("Rendering text overlays…", 30);
+    await ensureFontsReady(); // Critical for mobile + new web fonts (Poppins/JetBrains)
     const ayahFrameBitmaps = await renderAyahOverlays(
       prepared,
       surah,
@@ -578,9 +655,13 @@ export async function generateVideo(params: {
     /* ── 4. Wait for background bytes (already downloading since
        step 1a — usually already resolved). ─────────────────────── */
     log("Preparing background…", 40);
-    const bgVideoBytes = await bgBytesPromise;
+    const bgVideoBytesList = await bgBytesPromise;
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    if (needsBgVideo && !bgVideoBytes) {
+    const requestedBg =
+      settings.background === "upload"
+        ? 1
+      : (settings.videoUrls?.length ?? (settings.videoUrl ? 1 : 0));
+    if (needsBgVideo && requestedBg > 0 && bgVideoBytesList.length === 0) {
       throw new Error(
         "Could not load the selected background video. Please re-select it in Settings or pick a color background, then try again.",
       );
@@ -603,7 +684,7 @@ export async function generateVideo(params: {
       frameDurationS: 1 / FPS,
       segments,
       ayahFrameBitmaps,
-      bgVideoBytes,
+      bgVideoBytes: bgVideoBytesList,
       maxBgFrames: MAX_BG_FRAMES,
       fullAudioTrack: fullTrack,
       transitionStyle: settings.transitionStyle,
@@ -637,7 +718,7 @@ function runWorkerEncode(opts: {
   frameDurationS: number;
   segments: WorkerSegment[];
   ayahFrameBitmaps: ImageBitmap[];
-  bgVideoBytes: ArrayBuffer | null;
+  bgVideoBytes: ArrayBuffer[];
   maxBgFrames: number;
   fullAudioTrack: Float32Array;
   transitionStyle: "none" | "fade" | "slide" | "scale";
@@ -707,8 +788,8 @@ function runWorkerEncode(opts: {
     const transferList: Transferable[] = [
       opts.fullAudioTrack.buffer as ArrayBuffer,
       ...opts.ayahFrameBitmaps,
+      ...opts.bgVideoBytes, // transfer every background video's bytes
     ];
-    if (opts.bgVideoBytes) transferList.push(opts.bgVideoBytes);
 
     worker.postMessage(startMsg, transferList);
   });

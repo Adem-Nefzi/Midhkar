@@ -2,6 +2,7 @@
 
 import { useI18n } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
+import { Reveal, usePointerVars } from "@/components/Reveal";
 
 export function Features() {
   const { t, locale } = useI18n();
@@ -71,8 +72,9 @@ export function Features() {
 
   return (
     <section
+      id="features"
       ref={ref}
-      className="relative overflow-hidden border-t border-gold/15 bg-ink-light/30 py-24 sm:py-32"
+      className="relative overflow-hidden border-t border-gold/10 bg-ink py-24 sm:py-32"
     >
       {/* Ambient glows */}
       <div className="absolute left-1/2 top-0 h-[400px] w-[600px] -translate-x-1/2 bg-gold/[0.03] blur-[100px]" />
@@ -124,10 +126,8 @@ export function Features() {
       <div className="absolute bottom-[20%] right-[10%] h-[180px] w-[180px] animate-float-2 rounded-full bg-gold/[0.03] blur-[70px]" />
 
       <div className="relative z-10 mx-auto max-w-6xl px-6">
-        {/* Section header with Islamic ornament — brighter */}
-        <div
-          className={`text-center mb-16 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"} transition-all duration-700`}
-        >
+        {/* Section header with Islamic ornament — modern reveal */}
+        <Reveal className="text-center mb-16">
           {/* Ornamental divider above title — brighter */}
           <div className="flex items-center justify-center gap-5 mb-8">
             <div className="h-px w-20 bg-gradient-to-r from-transparent to-gold/40" />
@@ -167,49 +167,59 @@ export function Features() {
             <div className="h-1.5 w-1.5 rounded-full bg-gold/30" />
             <div className="h-px w-12 bg-gradient-to-l from-transparent to-gold/25" />
           </div>
-        </div>
+        </Reveal>
 
-        {/* Feature cards with richer Islamic border styling */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Feature cards — modern glass bento */}
+        <div className="grid gap-5 sm:grid-cols-1 md:grid-cols-3">
           {items.map((item, i) => (
-            <div
-              key={i}
-              className={`group relative rounded-sm border border-gold/15 bg-gradient-to-b from-ink-light/50 to-ink/60 p-8 transition-all duration-500 hover:border-gold/35 hover:bg-ink-light/60 hover:-translate-y-1 hover:shadow-lg hover:shadow-gold/5 ${
-                visible
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-8"
-              }`}
-              style={{ transitionDelay: `${200 + i * 150}ms` }}
-            >
-              {/* Corner ornaments — brighter */}
-              <div className="absolute top-0 left-0 h-5 w-5 border-t-2 border-l-2 border-gold/25" />
-              <div className="absolute top-0 right-0 h-5 w-5 border-t-2 border-r-2 border-gold/25" />
-              <div className="absolute bottom-0 left-0 h-5 w-5 border-b-2 border-l-2 border-gold/25" />
-              <div className="absolute bottom-0 right-0 h-5 w-5 border-b-2 border-r-2 border-gold/25" />
-              {/* Inner corner accents */}
-              <div className="absolute top-1.5 left-1.5 h-2.5 w-2.5 border-t border-l border-gold/12" />
-              <div className="absolute top-1.5 right-1.5 h-2.5 w-2.5 border-t border-r border-gold/12" />
-              <div className="absolute bottom-1.5 left-1.5 h-2.5 w-2.5 border-b border-l border-gold/12" />
-              <div className="absolute bottom-1.5 right-1.5 h-2.5 w-2.5 border-b border-r border-gold/12" />
-
-              {/* Icon with glow on hover */}
-              <div className="mb-5 inline-flex rounded-sm border border-gold/25 bg-gold/15 p-3.5 text-gold transition-all duration-300 group-hover:bg-gold/25 group-hover:border-gold/40 group-hover:shadow-md group-hover:shadow-gold/10">
-                {icons[i]}
-              </div>
-
-              <h3 className="font-display text-lg font-medium text-parchment mb-3">
-                {item.title}
-              </h3>
-              <p className="text-sm leading-relaxed text-parchment-muted/80">
-                {item.description}
-              </p>
-
-              {/* Bottom accent line */}
-              <div className="mt-6 h-px w-12 bg-gradient-to-r from-gold/20 to-transparent transition-all duration-300 group-hover:w-20 group-hover:from-gold/40" />
-            </div>
+            <FeatureCard key={i} item={item} index={i} icon={icons[i]} />
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+function FeatureCard({
+  item,
+  index,
+  icon,
+}: {
+  item: { title: string; description: string };
+  index: number;
+  icon: React.ReactNode;
+}) {
+  const ref = usePointerVars<HTMLDivElement>();
+  return (
+    <Reveal delay={index * 110} y={26}>
+      <div
+        ref={ref}
+        className="group btn-luxe glass relative h-full overflow-hidden rounded-2xl p-7 transition-all duration-500 hover:-translate-y-1.5 hover:border-gold/35 hover:shadow-[0_20px_50px_-20px_rgba(212,175,55,0.22)]"
+      >
+        {/* Gradient wash that follows the pointer */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              "radial-gradient(300px circle at var(--mx,50%) var(--my,50%), rgba(212,175,55,0.10), transparent 55%)",
+          }}
+        />
+
+        {/* Icon chip */}
+        <div className="relative mb-5 inline-flex rounded-xl border border-gold/25 bg-gold/10 p-3.5 text-gold shadow-inner shadow-gold/5 transition-all duration-500 group-hover:scale-105 group-hover:border-gold/50 group-hover:bg-gold/20 group-hover:shadow-gold/20">
+          {icon}
+        </div>
+
+        <h3 className="font-display text-lg font-semibold text-parchment">
+          {item.title}
+        </h3>
+        <p className="mt-2.5 text-sm leading-relaxed text-parchment-muted/85">
+          {item.description}
+        </p>
+
+        {/* Bottom accent line that grows on hover */}
+        <div className="mt-6 h-px w-10 bg-gradient-to-r from-gold/40 to-transparent transition-all duration-500 group-hover:w-24 group-hover:from-gold/70" />
+      </div>
+    </Reveal>
   );
 }

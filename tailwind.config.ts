@@ -35,8 +35,11 @@ const config: Config = {
       },
       fontFamily: {
         display: ["var(--font-display)", "system-ui", "sans-serif"],
-        arabic: ["'Amiri'", "'Scheherazade New'", "serif"],
-        naskh: ["'Noto Naskh Arabic'", "'Lateef'", "serif"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        poppins: ["'Poppins'", "system-ui", "sans-serif"],
+        jetbrains: ["'JetBrains Mono'", "ui-monospace", "monospace"],
+        arabic: ["var(--font-arabic)", "'Scheherazade New'", "serif"],
+        naskh: ["var(--font-naskh)", "'Lateef'", "serif"],
         kufi: [
           "'Noto Kufi Arabic'",
           "'Reem Kufi'",
@@ -62,6 +65,9 @@ const config: Config = {
         "geometric-rotate": "geometricRotate 30s linear infinite",
         "lantern-flicker": "lanternFlicker 3s ease-in-out infinite",
         "crescent-glow": "crescentGlow 5s ease-in-out infinite",
+        "aurora-drift": "auroraDrift 18s ease-in-out infinite",
+        "fade-in-scale": "fadeInScale .7s cubic-bezier(.22,1,.36,1) both",
+        "scroll-cue": "scrollCue 2.2s ease-in-out infinite",
       },
       keyframes: {
         fadeUp: {
@@ -113,6 +119,18 @@ const config: Config = {
         crescentGlow: {
           "0%, 100%": { boxShadow: "0 0 20px rgba(212, 175, 55, 0.1)" },
           "50%": { boxShadow: "0 0 40px rgba(212, 175, 55, 0.2)" },
+        },
+        auroraDrift: {
+          "0%, 100%": { transform: "translate3d(0,0,0) rotate(0deg) scale(1)", opacity: "0.55" },
+          "50%": { transform: "translate3d(4%,-6%,0) rotate(8deg) scale(1.12)", opacity: "0.85" },
+        },
+        fadeInScale: {
+          "0%": { opacity: "0", transform: "translateY(18px) scale(.985)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
+        scrollCue: {
+          "0%, 100%": { transform: "translateY(0)", opacity: "0.9" },
+          "50%": { transform: "translateY(7px)", opacity: ".4" },
         },
       },
       backgroundImage: {

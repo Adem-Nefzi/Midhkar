@@ -25,9 +25,17 @@ const FONTS_TO_ENSURE = [
   { family: "Lateef", weight: "700" },
   { family: "Reem Kufi", weight: "400" },
   { family: "Reem Kufi", weight: "700" },
-  // Latin fonts
+  // Latin fonts (web via next/font, or instant system via FontFace fallback)
   { family: "Inter", weight: "400" },
   { family: "Inter", weight: "600" },
+  { family: "Poppins", weight: "400" },
+  { family: "Poppins", weight: "500" },
+  { family: "Poppins", weight: "600" },
+  { family: "JetBrains Mono", weight: "400" },
+  { family: "JetBrains Mono", weight: "500" },
+  { family: "Georgia", weight: "400" },   // instant system everywhere
+  { family: "Georgia", weight: "700" },   // instant system everywhere
+  { family: "Noto Naskh Arabic", weight: "400" }, // ensure loaded alongside Amiri
   { family: "Lato", weight: "400" },
   { family: "Lato", weight: "700" },
   { family: "Playfair Display", weight: "400" },

@@ -54,6 +54,10 @@ import {
 import type { PlatformId, Preset } from "@/lib/types";
 import { searchPexelsVideos } from "@/lib/pexels-client";
 import type { PexelsVideo } from "@/lib/pexels-client";
+import {
+  fetchVideoDuration,
+  getCachedVideoDuration,
+} from "@/lib/video-meta";
 
 /* ── Text colour palette ─────────────────────────────────────── */
 const TEXT_COLORS = [
@@ -148,6 +152,8 @@ interface Props {
   onBack: () => void;
   onNext: () => void;
   locale: string;
+  totalDurationSec: number | null;
+  durationLoading: boolean;
 }
 
 export function StepSettings({
@@ -169,9 +175,28 @@ export function StepSettings({
   onBack,
   onNext,
   locale,
+  totalDurationSec,
+  durationLoading,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const toggle = (k: keyof VideoSettings) => onChange(k, !settings[k] as any);
+
+  const fmtDur = (sec: number) => {
+    const s = Math.round(sec);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  /* ── Background-video playlist (ordered; index 0 plays first) ── */
+  const playlist: string[] = settings.videoUrls ?? [];
+  const isPlSelected = (url: string) => playlist.includes(url);
+  const togglePlaylist = (url: string) => {
+    onChange(
+      "videoUrls",
+      isPlSelected(url) ? playlist.filter((u) => u !== url) : [...playlist, url],
+    );
+  };
+  const removeFromPlaylist = (url: string) =>
+    onChange("videoUrls", playlist.filter((u) => u !== url));
 
   const platformChosen = !!settings.platform;
   const canProceed = platformChosen && !!selectedReciter;
@@ -754,62 +779,130 @@ export function StepSettings({
                   ) : (
                     <div className="max-h-48 overflow-y-auto custom-scrollbar">
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                        {storageVideos.map((v) => (
-                          <button
-                            key={v.id}
-                            onClick={() => {
-                              onChange("background", "library");
-                              onChange("videoUrl", v.url);
-                              onChange("videoThumb", "");
-                            }}
-                            className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
-                              settings.videoUrl === v.url
-                                ? "border-gold ring-2 ring-gold/30"
-                                : "border-gold/10 hover:border-gold/30"
-                            }`}
-                          >
-                            <video
-                              src={v.url}
-                              muted
-                              playsInline
-                              preload="metadata"
-                              className="w-full h-full object-cover"
-                              onLoadedData={(e) => {
-                                e.currentTarget.currentTime = 1;
-                              }}
-                              onMouseEnter={(e) =>
-                                e.currentTarget.play().catch(() => {})
-                              }
-                              onMouseLeave={(e) => {
-                                e.currentTarget.pause();
-                                e.currentTarget.currentTime = 1;
-                              }}
-                            />
-                            <DurationBadge videoRef={v.url} />
-                            {settings.videoUrl === v.url && (
-                              <div className="absolute inset-0 bg-gold/20 flex items-center justify-center">
-                                <CheckIcon className="h-4 w-4 text-gold" />
-                              </div>
-                            )}
-                          </button>
-                        ))}
+                        {storageVideos.map((v) => {
+                          const idx = playlist.indexOf(v.url);
+                          const sel = idx !== -1;
+                          return (
+                            <button
+                              key={v.id}
+                              onClick={() => togglePlaylist(v.url)}
+                              className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
+                                sel
+                                  ? "border-gold ring-2 ring-gold/30"
+                                  : "border-gold/10 hover:border-gold/30"
+                              }`}
+                            >
+                              <video
+                                src={v.url}
+                                muted
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-cover"
+                                onLoadedData={(e) => {
+                                  e.currentTarget.currentTime = 1;
+                                }}
+                                onMouseEnter={(e) =>
+                                  e.currentTarget.play().catch(() => {})
+                                }
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.pause();
+                                  e.currentTarget.currentTime = 1;
+                                }}
+                              />
+                              <DurationBadge videoRef={v.url} />
+                              {sel && (
+                                <>
+                                  <div className="absolute inset-0 bg-gold/10" />
+                                  <span className="absolute top-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-ink shadow">
+                                    {idx + 1}
+                                  </span>
+                                </>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
-                  {settings.videoUrl && (
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[10px] text-gold/40">
-                        ✓ {ar ? "فيديو محدد" : "Video selected"}
-                      </span>
-                      <button
-                        onClick={() => {
-                          onChange("videoUrl", null);
-                          onChange("videoThumb", null);
-                        }}
-                        className="text-[10px] text-red-400/60 hover:text-red-400 transition"
-                      >
-                        {ar ? "إزالة" : "Remove"}
-                      </button>
+
+                  {/* Selected playlist chips (order = play order) + duration hint */}
+                  {playlist.length > 0 && (
+                    <div className="rounded-lg border border-gold/15 bg-ink-light/20 p-2.5">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-[10px] uppercase tracking-wider text-parchment-muted/70">
+                          {ar
+                            ? "ترتيب التشغيل"
+                            : locale === "fr"
+                              ? "Ordre de lecture"
+                              : "Play order"}
+                          {" · "}
+                          {playlist.length}{" "}
+                          {ar ? "فيديو" : playlist.length === 1 ? "video" : "videos"}
+                        </p>
+                        <button
+                          onClick={() => onChange("videoUrls", [])}
+                          className="inline-flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/5 px-2 py-0.5 text-[10px] font-medium text-red-400 transition hover:border-red-500/45 hover:bg-red-500/10"
+                        >
+                          <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {playlist.map((u, idx) => (
+                          <span
+                            key={u}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold/10 px-2 py-0.5 text-[10px] text-gold"
+                          >
+                            <span className="font-semibold">{idx + 1}</span>
+                            <span className="max-w-[7rem] truncate opacity-80">
+                              {u.split("/").pop() || "video"}
+                            </span>
+                            <button
+                              onClick={() => removeFromPlaylist(u)}
+                              aria-label="Remove"
+                              className="rounded-full p-0.5 hover:bg-red-500/20 hover:text-red-300 transition"
+                            >
+                              <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Live playlist-vs-target coverage summary */}
+                      <PlaylistSummary
+                        urls={playlist}
+                        totalSec={totalDurationSec}
+                        durationLoading={durationLoading}
+                        ar={ar}
+                        locale={locale}
+                      />
+                    </div>
+                  )}
+
+                  {/* Duration hint — helps size the playlist to cover the output */}
+                  {(totalDurationSec !== null || durationLoading) && (
+                    <div className="flex items-center gap-2 px-1 text-[10px] text-parchment-muted/70">
+                      <svg className="h-3 w-3 shrink-0 text-gold/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <circle cx="12" cy="12" r="10" />
+                        <path strokeLinecap="round" d="M12 6v6l4 2" />
+                      </svg>
+                      {durationLoading ? (
+                        <span>
+                          {ar ? "… جاري قياس التلاوة" : locale === "fr" ? "… mesure de la récitation" : "… measuring recitation"}
+                        </span>
+                      ) : (
+                        <span>
+                          {ar
+                            ? `مدة الفيديو ≈ ${fmtDur(totalDurationSec!)} — اختر خلفيات بمجموع ≥ هذا الطول`
+                            : locale === "fr"
+                              ? `Durée ≈ ${fmtDur(totalDurationSec!)} — choisissez des fonds totalisant ≥ cette durée`
+                              : `Video ≈ ${fmtDur(totalDurationSec!)} — pick backgrounds totaling ≥ this`}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -819,15 +912,12 @@ export function StepSettings({
               {settings.background === "pexels" && (
                 <PexelsSearch
                   ar={ar}
-                  selected={settings.videoUrl}
-                  onSelect={(url, thumb) => {
-                    onChange("videoUrl", url);
-                    onChange("videoThumb", thumb);
-                  }}
-                  onClear={() => {
-                    onChange("videoUrl", null);
-                    onChange("videoThumb", null);
-                  }}
+                  selected={playlist}
+                  onSelect={(url) => togglePlaylist(url)}
+                  onRemove={removeFromPlaylist}
+                  totalSec={totalDurationSec}
+                  durationLoading={durationLoading}
+                  locale={locale}
                 />
               )}
 
@@ -1474,21 +1564,132 @@ function SwitchRow({
 
 /* ── Duration Badge (reads video metadata) ──────────────────── */
 
+/* ── Playlist duration summary — "3 videos · 1:25 total vs 1:40 needed" ── */
+function PlaylistSummary({
+  urls,
+  totalSec,
+  durationLoading,
+  ar,
+  locale,
+}: {
+  urls: string[];
+  totalSec: number | null;
+  durationLoading: boolean;
+  ar: boolean;
+  locale: string;
+}) {
+  const [sumSec, setSumSec] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!urls.length) { setSumSec(null); return; }
+    let alive = true;
+    setSumSec(null);
+    // Reuse the shared cache; resolve any unknown ones concurrently.
+    Promise.all(
+      urls.map(async (u) => {
+        const c = getCachedVideoDuration(u);
+        return c !== null ? c : await fetchVideoDuration(u);
+      }),
+    ).then((parts) => {
+      if (!alive) return;
+      let s = 0;
+      for (const p of parts) if (typeof p === "number") s += p;
+      setSumSec(Math.round(s));
+    });
+    return () => { alive = false; };
+  }, [JSON.stringify(urls)]);
+
+  if (!urls.length) return null;
+
+  const covered = sumSec !== null && totalSec !== null && sumSec >= totalSec;
+  const shortfall =
+    sumSec !== null && totalSec !== null
+      ? Math.max(0, Math.ceil(totalSec - sumSec))
+      : null;
+
+  function fmtDurLoose(sec: number) {
+    const s = Math.round(sec);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  return (
+    <div
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[10px] ${
+        covered
+          ? "border-verdant/40 bg-verdant/10 text-verdant"
+          : sumSec !== null &&
+              totalSec !== null &&
+              sumSec < totalSec
+            ? "border-gold/40 bg-gold/10 text-gold"
+            : "border-gold/15 bg-ink-light/20 text-parchment-muted/80"
+      }`}
+    >
+      <span className="inline-flex items-center gap-1.5 font-medium">
+        <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <circle cx="12" cy="12" r="10" />
+          <path strokeLinecap="round" d="M12 6v6l4 2" />
+        </svg>
+        <span className="uppercase tracking-wide opacity-80">
+          {ar ? "المجموع" : locale === "fr" ? "Total" : "Total"}
+        </span>
+        <span className="rounded-full bg-gold/15 px-1.5 py-0.5 text-[9px] font-semibold text-gold">
+          {urls.length}
+          {" "}
+          {ar
+            ? "فيديو"
+            : locale === "fr"
+              ? urls.length > 1 ? "vidéos" : "vidéo"
+              : urls.length === 1 ? "video" : "videos"}
+        </span>
+        <span className="font-semibold text-[11px]">
+          {sumSec === null ? "…" : fmtDurLoose(sumSec)}
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        {(totalSec !== null || durationLoading) && (
+          <>
+            <span className="opacity-60">
+              {ar ? "المطلوب" : locale === "fr" ? "requis" : "needed"}
+            </span>
+            <span className="font-semibold text-[11px]">
+              {durationLoading || totalSec === null ? "…" : fmtDurLoose(totalSec)}
+            </span>
+          </>
+        )}
+        {totalSec !== null && sumSec !== null && (
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+              covered ? "bg-verdant/20 text-verdant" : "bg-gold/20 text-gold"
+            }`}
+          >
+            {covered
+              ? ar
+                ? "يكفي"
+                : locale === "fr"
+                  ? "Suffisant"
+                  : "Enough"
+              : `+${fmtDurLoose(shortfall!)} ${ar ? "مطلوب" : locale === "fr" ? "requis" : "needed"}`}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function DurationBadge({ videoRef }: { videoRef: string }) {
-  const [duration, setDuration] = useState<number | null>(null);
+  const [duration, setDuration] = useState<number | null>(
+    () => getCachedVideoDuration(videoRef),
+  );
 
   useEffect(() => {
     if (!videoRef) return;
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.src = videoRef;
-    const onMeta = () => {
-      if (video.duration && isFinite(video.duration)) {
-        setDuration(video.duration);
-      }
-    };
-    video.addEventListener("loadedmetadata", onMeta);
-    return () => video.removeEventListener("loadedmetadata", onMeta);
+    const cached = getCachedVideoDuration(videoRef);
+    if (cached !== null) { setDuration(cached); return; }
+    let alive = true;
+    fetchVideoDuration(videoRef).then((d) => {
+      if (alive && d !== null) setDuration(d);
+    });
+    return () => { alive = false; };
   }, [videoRef]);
 
   if (duration === null) return null;
@@ -1528,13 +1729,23 @@ function PexelsSearch({
   ar,
   selected,
   onSelect,
-  onClear,
+  onRemove,
+  totalSec,
+  durationLoading,
+  locale,
 }: {
   ar: boolean;
-  selected: string | null;
-  onSelect: (url: string, thumb: string) => void;
-  onClear: () => void;
+  selected: string[];
+  onSelect: (url: string) => void;
+  onRemove: (url: string) => void;
+  totalSec: number | null;
+  durationLoading: boolean;
+  locale: string;
 }) {
+  const fmtDur = (sec: number) => {
+    const s = Math.round(sec);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
   const [query, setQuery] = useState("nature");
   const [results, setResults] = useState<PexelsVideo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1663,36 +1874,45 @@ function PexelsSearch({
         <>
           <div className="max-h-64 overflow-y-auto custom-scrollbar">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {results.map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => onSelect(v.videoUrl, v.image)}
-                  className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
-                    selected === v.videoUrl
-                      ? "border-gold ring-2 ring-gold/30"
-                      : "border-gold/10 hover:border-gold/30"
-                  }`}
-                >
-                  <img
-                    src={v.image}
-                    alt={v.photographer}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
-                  <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
-                    {Math.floor(v.duration / 60)}:
-                    {(v.duration % 60).toString().padStart(2, "0")}
-                  </span>
-                  <span className="absolute top-1.5 left-1.5 rounded bg-gold/20 backdrop-blur-sm px-1.5 py-0.5 text-[8px] font-medium text-gold pointer-events-none">
-                    {v.width}×{v.height}
-                  </span>
-                  {selected === v.videoUrl && (
-                    <div className="absolute inset-0 bg-gold/20 flex items-center justify-center">
-                      <CheckIcon className="h-4 w-4 text-gold" />
-                    </div>
-                  )}
-                </button>
-              ))}
+              {results.map((v) => {
+                const idx = selected.indexOf(v.videoUrl);
+                const isSel = idx !== -1;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() =>
+                      isSel ? onRemove(v.videoUrl) : onSelect(v.videoUrl)
+                    }
+                    className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
+                      isSel
+                        ? "border-gold ring-2 ring-gold/30"
+                        : "border-gold/10 hover:border-gold/30"
+                    }`}
+                  >
+                    <img
+                      src={v.image}
+                      alt={v.photographer}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                    />
+                    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
+                      {Math.floor(v.duration / 60)}:
+                      {(v.duration % 60).toString().padStart(2, "0")}
+                    </span>
+                    <span className="absolute top-1.5 left-1.5 rounded bg-gold/20 backdrop-blur-sm px-1.5 py-0.5 text-[8px] font-medium text-gold pointer-events-none">
+                      {v.width}×{v.height}
+                    </span>
+                    {isSel && (
+                      <>
+                        <div className="absolute inset-0 bg-gold/10" />
+                        <span className="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-ink shadow">
+                          {idx + 1}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
             </div>
             {hasMore && (
               <div ref={sentinelRef} className="flex justify-center py-4">
@@ -1703,17 +1923,72 @@ function PexelsSearch({
         </>
       )}
 
-      {selected && (
-        <div className="flex items-center justify-between px-1">
-          <span className="text-[10px] text-gold/40">
-            ✓ {ar ? "فيديو محدد" : "Video selected"}
-          </span>
-          <button
-            onClick={onClear}
-            className="text-[10px] text-red-400/60 hover:text-red-400 transition"
-          >
-            {ar ? "إزالة" : "Remove"}
-          </button>
+      {/* Live playlist length summary (count + total) + coverage vs target */}
+      {selected.length > 0 && (
+        <PlaylistSummary
+          urls={selected}
+          totalSec={totalSec}
+          durationLoading={durationLoading}
+          ar={ar}
+          locale={locale}
+        />
+      )}
+
+      {(selected.length > 0 || totalSec !== null || durationLoading) && (
+        <div className="flex flex-wrap items-center gap-3 px-1">
+          {selected.length > 0 && (
+            <>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold/10 px-2.5 py-0.5 text-[10px] font-semibold text-gold">
+                {selected.length}{" "}
+                {selected.length === 1
+                  ? ar
+                    ? "فيديو"
+                    : locale === "fr"
+                      ? "vidéo"
+                      : "video"
+                  : ar
+                    ? "فيديوهات"
+                    : locale === "fr"
+                      ? "vidéos"
+                      : "videos"}
+              </span>
+              {/* Clear all selected background videos */}
+              <button
+                onClick={() => selected.forEach(onRemove)}
+                className="inline-flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/5 px-2 py-0.5 text-[10px] font-medium text-red-400 transition hover:border-red-500/45 hover:bg-red-500/10"
+              >
+                <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
+              </button>
+            </>
+          )}
+          {(totalSec !== null || durationLoading) && (
+            <span className="inline-flex items-center gap-1.5 text-[10px] text-parchment-muted/70">
+              <svg
+                className="h-3 w-3 text-gold/60"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path strokeLinecap="round" d="M12 6v6l4 2" />
+              </svg>
+              {durationLoading
+                ? ar
+                  ? "… جاري قياس التلاوة"
+                  : locale === "fr"
+                    ? "… mesure de la récitation"
+                    : "… measuring recitation"
+                : ar
+                  ? `مدة الفيديو ≈ ${fmtDur(totalSec!)}`
+                  : locale === "fr"
+                    ? `Durée ≈ ${fmtDur(totalSec!)}`
+                    : `Video ≈ ${fmtDur(totalSec!)}`}
+            </span>
+          )}
         </div>
       )}
     </div>

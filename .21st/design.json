@@ -1,0 +1,45 @@
+{
+  "name": "Midhkar",
+  "direction": {
+    "id": "aurora-luxe-manuscript",
+    "description": "Modern luxe dark UI fusing Islamic manuscript illumination (girih geometry, medallions, gold illumination) with contemporary glassmorphism + aurora effects, physics-feel motion, and scroll reveal choreography.",
+    "styles": [
+      "Glassmorphism (aurora-adapted, gold-on-ink, Near-East tokens)",
+      "Aurora UI (drifting radial beams in gold/verdant)",
+      "Soft UI Evolution (rounded, cushioned, smooth)",
+      "Motion-Driven Micro-interactions (GPU-composited, reduced-motion safe)"
+    ],
+    "paletteSource": "existing CSS vars in app/globals.css",
+    "colors": {
+      "ink": "rgb(var(--ink)) / #0c0a09",
+      "ink-soft": "rgb(var(--ink-soft)) / #1c1917-ish",
+      "gold": "rgb(var(--gold)) / #d4af37",
+      "gold-soft": "rgb(var(--gold-soft)) / #e5c76b",
+      "verdant": "rgb(var(--verdant)) / #5f8d6e",
+      "parchment": "rgb(var(--parchment)) / #f5f0e8",
+      "parchment-muted": "rgb(var(--parchment-muted)) / #a8a29e"
+    },
+    "typography": {
+      "display": "Fraunces (--font-display)",
+      "sans": "Inter (--font-sans)",
+      "arabic": "Amiri / Scheherazade New (--font-arabic)"
+    },
+    "effects": [
+      "glass / glass-strong / glass-soft (backdrop-blur)",
+      "gradient-border (masked 1px gold gradient hairline)",
+      "text-shine (animated gradient headline)",
+      "btn-luxe (pointer-tracked radial glow)",
+      "aurora-drift (physics-feel drifting light)",
+      "noise grain overlay (SVG turbulence, blend overlay)",
+      "marquee (Bismillah ticker)",
+      "scroll reveal via IntersectionObserver (Reveal.tsx)"
+    ],
+    "decisions": [
+      "Kept all existing brand tokens; no new hues introduced.",
+      "Glassmorphism adapted to gold-tinted ink (not white).",
+      "Manuscript ornaments (girih/medallions) preserved as sparse, atmospheric layer under modern surface treatments.",
+      "RTL-aware: CTA arrows flip with rtl:; Arabic uses Amiri.",
+      "Performance: backdrop-blur scoped to surfaces only; background motion is transform/opacity composited; reduced-motion globally respected."
+    ]
+  }
+}

@@ -70,9 +70,11 @@ export type WorkerInMessage =
         channels: number;
         segments: WorkerSegment[];
         ayahFrameBitmaps: ImageBitmap[];
-        /** Raw bytes of the background video file, or null if no video bg. */
-        bgVideoBytes: ArrayBuffer | null;
-        /** Cap on how many unique background frames to decode (one loop). */
+        /** Ordered playlist of background videos (raw bytes). Empty = no video bg.
+         *  They're played back-to-back; the last loops if the total is shorter
+         *  than the output, and items stop early if it's longer. */
+        bgVideoBytes: ArrayBuffer[];
+        /** Cap on unique bg frames decoded PER VIDEO (decoded in parallel). */
         maxBgFrames: number;
         /** One continuous PCM track for the whole video, mono Float32. */
         fullAudioTrack: ArrayBuffer;
@@ -127,7 +129,6 @@ async function decodeBackgroundFrames(
   ch: number,
   renderFps: number,
   maxFrames: number,
-  totalOutputFrames: number,
   onProgress: (done: number, total: number) => void,
 ): Promise<ImageBitmap[]> {
   try {
@@ -148,11 +149,9 @@ async function decodeBackgroundFrames(
         ? rawDuration
         : 10;
     const uniqueFrameCount = Math.max(1, Math.ceil(safeDuration * renderFps));
-    const count = Math.min(
-      uniqueFrameCount,
-      maxFrames,
-      totalOutputFrames || uniqueFrameCount,
-    );
+    // Decode up to maxFrames unique frames; looping repeats them seamlessly
+    // from the start, so no need to cap against the total output length here.
+    const count = Math.min(uniqueFrameCount, maxFrames);
 
     const sink = new CanvasSink(videoTrack, {
       width: cw,
@@ -272,23 +271,40 @@ async function runEncode(payload: StartPayload) {
   await output.start();
 
   /* ── Kick off background decode NOW — runs concurrently with
-     audio encoding below. ─────────────────────────────────────── */
-  const totalFrames = segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
-
-  const bgFramesPromise: Promise<ImageBitmap[]> = bgVideoBytes
-    ? decodeBackgroundFrames(
-        bgVideoBytes,
-        cw,
-        ch,
-        renderFps,
-        maxBgFrames,
-        totalFrames,
-        (done, total) =>
-          post({
-            type: "progress",
-            msg: `Decoding background… ${done}/${total}`,
-            pct: 40 + Math.round((done / total) * 8),
-          }),
+     audio encoding below. Each video is decoded IN PARALLEL into its
+     own ordered frame list (playlist[i]). At composite time the lists
+     are strung together end-to-end: video 1 fully, then video 2, etc.,
+     with a quick crossfade at each seam. The FINAL video loops if the
+     whole playlist is shorter than the output. ────────────────────── */
+  const videoCount = bgVideoBytes.length;
+  const perVideoCap = Math.max(
+    1,
+    Math.floor(maxBgFrames / Math.max(1, videoCount)),
+  );
+  const decodedCounts = new Array<number>(videoCount).fill(0);
+  const bgFramesPromise: Promise<ImageBitmap[][]> = videoCount
+    ? Promise.all(
+        bgVideoBytes.map((bytes, vi) =>
+          decodeBackgroundFrames(
+            bytes,
+            cw,
+            ch,
+            renderFps,
+            perVideoCap,
+            (done, total) => {
+              decodedCounts[vi] = done;
+              const sum = decodedCounts.reduce((a, b) => a + b, 0);
+              post({
+                type: "progress",
+                msg:
+                  videoCount > 1
+                    ? `Decoding backgrounds ${vi + 1}/${videoCount}…`
+                    : `Decoding background… ${done}/${total}`,
+                pct: 40 + Math.round((sum / (perVideoCap * videoCount)) * 8),
+              });
+            },
+          ),
+        ),
       )
     : Promise.resolve([]);
 
@@ -333,14 +349,17 @@ async function runEncode(payload: StartPayload) {
 
   /* ── Wait for background frames (usually already done). ───────── */
   post({ type: "progress", msg: "Finalising background…", pct: 54 });
-  const bgBitmaps = await bgFramesPromise;
+  const bgPlaylist = await bgFramesPromise;
+  const bgLen = bgPlaylist.map((l) => l.length);
+  const hasBg = bgLen.some((n) => n > 0);
+  const seamFrames = Math.min(10, Math.round(renderFps / 3)); // short crossfade between playlist items
   if (aborted) {
-    bgBitmaps.forEach((b) => b.close());
+    bgPlaylist.flat().forEach((b) => b.close());
     throw new DOMException("Aborted", "AbortError");
   }
-  const bgDecodeFailed = !!bgVideoBytes && bgBitmaps.length === 0;
+  const bgDecodeFailed = videoCount > 0 && !hasBg;
   const bgDarkenAlpha =
-    bgBitmaps.length > 0 || bgDecodeFailed
+    hasBg || bgDecodeFailed
       ? Math.min(0.8, Math.max(0, bgOverlayPct / 100))
       : 0;
   if (bgDecodeFailed) {
@@ -388,14 +407,37 @@ async function runEncode(payload: StartPayload) {
 
       // ── Render unique frame content (once per renderFps frame) ───
       ctx.clearRect(0, 0, cw, ch);
-      if (bgBitmaps.length > 0) {
-        ctx.drawImage(
-          bgBitmaps[globalRenderIdx % bgBitmaps.length],
-          0,
-          0,
-          cw,
-          ch,
-        );
+      if (hasBg) {
+        /* Ordered playlist compositing: walk `globalRenderIdx` through
+           each video's frame list in turn, looping the LAST video if the
+           output outlives every item, and crossfading at each seam. */
+        let cursor = globalRenderIdx;
+        let i = 0;
+        while (i < bgLen.length && cursor >= bgLen[i]) {
+          cursor -= bgLen[i];
+          i++;
+        }
+        if (i >= bgLen.length) {
+          // Output longer than the whole playlist — loop the last video.
+          i = bgLen.length - 1;
+          cursor = cursor % Math.max(1, bgLen[i]);
+        }
+        // Skip zero-length lists (a failed video) forward to one that has frames.
+        while (bgLen[i] === 0 && i < bgLen.length - 1) i++;
+
+        const cur = bgPlaylist[i][cursor % bgLen[i]];
+        ctx.drawImage(cur, 0, 0, cw, ch);
+
+        // Crossfade to the NEXT playlist item over the current one's tail.
+        // (Skipped while the final item is looping to fill extra length.)
+        const nextHasFrames = i + 1 < bgLen.length && bgLen[i + 1] > 0;
+        if (nextHasFrames && cursor >= bgLen[i] - seamFrames) {
+          const t = cursor - (bgLen[i] - seamFrames); // 0..seamFrames-1
+          const a = Math.min(1, (t + 1) / (seamFrames + 1));
+          ctx.globalAlpha = a;
+          ctx.drawImage(bgPlaylist[i + 1][0], 0, 0, cw, ch);
+          ctx.globalAlpha = 1;
+        }
       } else if (bgDecodeFailed) {
         ctx.fillStyle = FALLBACK_BG_COLOR;
         ctx.fillRect(0, 0, cw, ch);
@@ -501,7 +543,7 @@ async function runEncode(payload: StartPayload) {
   if (!buffer) throw new Error("Finalize completed but buffer is empty");
 
   ayahFrameBitmaps.forEach((b) => b.close());
-  bgBitmaps.forEach((b) => b.close());
+  bgPlaylist.flat().forEach((b) => b.close());
 
   post({ type: "progress", msg: "Done!", pct: 100 });
   post({ type: "done", buffer }, [buffer]);

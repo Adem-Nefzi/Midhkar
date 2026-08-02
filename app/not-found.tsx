@@ -1,6 +1,11 @@
-import Link from "next/link";
+"use client";
 
-export default function NotFound() {
+import Link from "next/link";
+import { I18nProvider, useI18n } from "@/lib/i18n";
+
+function NotFoundContent() {
+  const { t } = useI18n();
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-ink flex items-center justify-center px-6">
       {/* Girih tessellation background */}
@@ -44,14 +49,14 @@ export default function NotFound() {
 
         <div className="flex items-center justify-center gap-3 mb-4">
           <div className="h-px w-12 bg-gradient-to-r from-transparent to-gold/40" />
-          <span className="text-gold/60 text-sm uppercase tracking-[0.3em]">Lost Path</span>
+          <span className="text-gold/60 text-sm uppercase tracking-[0.3em]">
+            {t("notFound.eyebrow")}
+          </span>
           <div className="h-px w-12 bg-gradient-to-l from-transparent to-gold/40" />
         </div>
 
-        <p className="text-parchment-muted text-sm sm:text-base max-w-md mx-auto mb-8 leading-relaxed">
-          The page you seek has wandered off the path.
-          <br />
-          Let us guide you back, by the will of Allah.
+        <p className="text-parchment-muted text-sm sm:text-base max-w-md mx-auto mb-8 leading-relaxed whitespace-pre-line">
+          {t("notFound.subtitle")}
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -60,13 +65,13 @@ export default function NotFound() {
             className="group relative overflow-hidden rounded-full bg-gold px-8 py-3 text-sm font-semibold text-ink transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 btn-press"
           >
             <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-            <span className="relative">Return Home</span>
+            <span className="relative">{t("notFound.returnHome")}</span>
           </Link>
           <Link
             href="/create"
             className="rounded-full border border-gold/30 px-8 py-3 text-sm text-gold hover:bg-gold/10 transition-all btn-press"
           >
-            Create a Video
+            {t("notFound.createCta")}
           </Link>
         </div>
 
@@ -75,10 +80,17 @@ export default function NotFound() {
           وَعَلَّمَكَ مَا لَمْ تَكُنْ تَعْلَمُ ۚ وَكَانَ فَضْلُ اللَّهِ عَلَيْكَ عَظِيمًا
         </p>
         <p className="mt-1 text-parchment-muted/30 text-[10px]">
-          "And He taught you that which you knew not. And the favor of Allah upon you is immense."
-          — Surah An-Nisa 4:113
+          {t("notFound.reference")}
         </p>
       </div>
     </main>
+  );
+}
+
+export default function NotFound() {
+  return (
+    <I18nProvider>
+      <NotFoundContent />
+    </I18nProvider>
   );
 }
