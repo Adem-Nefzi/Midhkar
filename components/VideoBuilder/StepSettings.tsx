@@ -197,6 +197,7 @@ export function StepSettings({
   };
   const removeFromPlaylist = (url: string) =>
     onChange("videoUrls", playlist.filter((u) => u !== url));
+  const clearPlaylist = () => onChange("videoUrls", []);
 
   const platformChosen = !!settings.platform;
   const canProceed = platformChosen && !!selectedReciter;
@@ -825,30 +826,16 @@ export function StepSettings({
                     </div>
                   )}
 
-                  {/* Selected playlist chips (order = play order) + duration hint */}
+                  {/* Selected playlist chips (order = play order) + totals/clear row */}
                   {playlist.length > 0 && (
                     <div className="rounded-lg border border-gold/15 bg-ink-light/20 p-2.5">
-                      <div className="mb-2 flex items-center justify-between">
-                        <p className="text-[10px] uppercase tracking-wider text-parchment-muted/70">
-                          {ar
-                            ? "ترتيب التشغيل"
-                            : locale === "fr"
-                              ? "Ordre de lecture"
-                              : "Play order"}
-                          {" · "}
-                          {playlist.length}{" "}
-                          {ar ? "فيديو" : playlist.length === 1 ? "video" : "videos"}
-                        </p>
-                        <button
-                          onClick={() => onChange("videoUrls", [])}
-                          className="inline-flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/5 px-2 py-0.5 text-[10px] font-medium text-red-400 transition hover:border-red-500/45 hover:bg-red-500/10"
-                        >
-                          <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                          {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
-                        </button>
-                      </div>
+                      <p className="mb-2 text-[10px] uppercase tracking-wider text-parchment-muted/70">
+                        {ar
+                          ? "ترتيب التشغيل"
+                          : locale === "fr"
+                            ? "Ordre de lecture"
+                            : "Play order"}
+                      </p>
                       <div className="flex flex-wrap gap-1.5">
                         {playlist.map((u, idx) => (
                           <span
@@ -872,37 +859,14 @@ export function StepSettings({
                         ))}
                       </div>
 
-                      {/* Live playlist-vs-target coverage summary */}
-                      <PlaylistSummary
+                      {/* One simple line: total footage + clear all */}
+                      <PlaylistTotals
                         urls={playlist}
                         totalSec={totalDurationSec}
-                        durationLoading={durationLoading}
                         ar={ar}
                         locale={locale}
+                        onClearAll={clearPlaylist}
                       />
-                    </div>
-                  )}
-
-                  {/* Duration hint — helps size the playlist to cover the output */}
-                  {(totalDurationSec !== null || durationLoading) && (
-                    <div className="flex items-center gap-2 px-1 text-[10px] text-parchment-muted/70">
-                      <svg className="h-3 w-3 shrink-0 text-gold/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <circle cx="12" cy="12" r="10" />
-                        <path strokeLinecap="round" d="M12 6v6l4 2" />
-                      </svg>
-                      {durationLoading ? (
-                        <span>
-                          {ar ? "… جاري قياس التلاوة" : locale === "fr" ? "… mesure de la récitation" : "… measuring recitation"}
-                        </span>
-                      ) : (
-                        <span>
-                          {ar
-                            ? `مدة الفيديو ≈ ${fmtDur(totalDurationSec!)} — اختر خلفيات بمجموع ≥ هذا الطول`
-                            : locale === "fr"
-                              ? `Durée ≈ ${fmtDur(totalDurationSec!)} — choisissez des fonds totalisant ≥ cette durée`
-                              : `Video ≈ ${fmtDur(totalDurationSec!)} — pick backgrounds totaling ≥ this`}
-                        </span>
-                      )}
                     </div>
                   )}
                 </div>
@@ -915,6 +879,7 @@ export function StepSettings({
                   selected={playlist}
                   onSelect={(url) => togglePlaylist(url)}
                   onRemove={removeFromPlaylist}
+                  onClear={clearPlaylist}
                   totalSec={totalDurationSec}
                   durationLoading={durationLoading}
                   locale={locale}
@@ -1564,114 +1529,70 @@ function SwitchRow({
 
 /* ── Duration Badge (reads video metadata) ──────────────────── */
 
-/* ── Playlist duration summary — "3 videos · 1:25 total vs 1:40 needed" ── */
-function PlaylistSummary({
+/* ── Simple playlist totals — "3 videos · 1:25 / 1:40 needed  [Clear all]" ── */
+function PlaylistTotals({
   urls,
   totalSec,
-  durationLoading,
   ar,
   locale,
+  onClearAll,
 }: {
   urls: string[];
   totalSec: number | null;
-  durationLoading: boolean;
   ar: boolean;
   locale: string;
+  onClearAll: () => void;
 }) {
-  const [sumSec, setSumSec] = useState<number | null>(null);
-
+  // Sum known durations synchronously every render — no effects, no
+  // promises, no stale state. Unknown durations warm the cache once via
+  // metadata read, then a re-render shows the full value.
+  let sumSec = 0;
+  for (const u of urls) sumSec += getCachedVideoDuration(u) ?? 0;
   useEffect(() => {
-    if (!urls.length) { setSumSec(null); return; }
-    let alive = true;
-    setSumSec(null);
-    // Reuse the shared cache; resolve any unknown ones concurrently.
-    Promise.all(
-      urls.map(async (u) => {
-        const c = getCachedVideoDuration(u);
-        return c !== null ? c : await fetchVideoDuration(u);
-      }),
-    ).then((parts) => {
-      if (!alive) return;
-      let s = 0;
-      for (const p of parts) if (typeof p === "number") s += p;
-      setSumSec(Math.round(s));
+    urls.forEach((u) => {
+      if (getCachedVideoDuration(u) === null) fetchVideoDuration(u);
     });
-    return () => { alive = false; };
-  }, [JSON.stringify(urls)]);
+  }, [urls.join("|")]);
 
   if (!urls.length) return null;
 
-  const covered = sumSec !== null && totalSec !== null && sumSec >= totalSec;
-  const shortfall =
-    sumSec !== null && totalSec !== null
-      ? Math.max(0, Math.ceil(totalSec - sumSec))
-      : null;
-
-  function fmtDurLoose(sec: number) {
-    const s = Math.round(sec);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }
+  const mm = (n: number) =>
+    `${Math.floor(n / 60)}:${String(Math.round(n) % 60).padStart(2, "0")}`;
+  const enough = totalSec !== null && sumSec >= totalSec;
 
   return (
-    <div
-      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[10px] ${
-        covered
-          ? "border-verdant/40 bg-verdant/10 text-verdant"
-          : sumSec !== null &&
-              totalSec !== null &&
-              sumSec < totalSec
-            ? "border-gold/40 bg-gold/10 text-gold"
-            : "border-gold/15 bg-ink-light/20 text-parchment-muted/80"
-      }`}
-    >
-      <span className="inline-flex items-center gap-1.5 font-medium">
-        <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <circle cx="12" cy="12" r="10" />
-          <path strokeLinecap="round" d="M12 6v6l4 2" />
-        </svg>
-        <span className="uppercase tracking-wide opacity-80">
-          {ar ? "المجموع" : locale === "fr" ? "Total" : "Total"}
-        </span>
-        <span className="rounded-full bg-gold/15 px-1.5 py-0.5 text-[9px] font-semibold text-gold">
-          {urls.length}
-          {" "}
-          {ar
-            ? "فيديو"
-            : locale === "fr"
-              ? urls.length > 1 ? "vidéos" : "vidéo"
-              : urls.length === 1 ? "video" : "videos"}
-        </span>
-        <span className="font-semibold text-[11px]">
-          {sumSec === null ? "…" : fmtDurLoose(sumSec)}
-        </span>
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        {(totalSec !== null || durationLoading) && (
+    <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1 text-[11px] text-parchment-muted/80">
+      <span>
+        {urls.length}{" "}
+        {ar
+          ? urls.length > 2 ? "فيديوهات" : "فيديو"
+          : locale === "fr"
+            ? urls.length > 1 ? "vidéos" : "vidéo"
+            : urls.length === 1 ? "video" : "videos"}
+        {" · "}
+        {mm(sumSec)}
+        {totalSec !== null && (
           <>
-            <span className="opacity-60">
-              {ar ? "المطلوب" : locale === "fr" ? "requis" : "needed"}
-            </span>
-            <span className="font-semibold text-[11px]">
-              {durationLoading || totalSec === null ? "…" : fmtDurLoose(totalSec)}
+            <span className="text-gold/70"> / </span>
+            {mm(totalSec)} {ar ? "مطلوب" : locale === "fr" ? "requis" : "needed"}
+            <span className={enough ? "text-verdant" : "text-gold"}>
+              {enough
+                ? " ✓"
+                : ` (+${mm(totalSec - sumSec)} ${ar ? "ناقص" : locale === "fr" ? "manquant" : "short"})`}
             </span>
           </>
         )}
-        {totalSec !== null && sumSec !== null && (
-          <span
-            className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
-              covered ? "bg-verdant/20 text-verdant" : "bg-gold/20 text-gold"
-            }`}
-          >
-            {covered
-              ? ar
-                ? "يكفي"
-                : locale === "fr"
-                  ? "Suffisant"
-                  : "Enough"
-              : `+${fmtDurLoose(shortfall!)} ${ar ? "مطلوب" : locale === "fr" ? "requis" : "needed"}`}
-          </span>
-        )}
       </span>
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="inline-flex items-center gap-1 text-red-400/90 transition hover:text-red-300"
+      >
+        <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+        {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
+      </button>
     </div>
   );
 }
@@ -1730,6 +1651,7 @@ function PexelsSearch({
   selected,
   onSelect,
   onRemove,
+  onClear,
   totalSec,
   durationLoading,
   locale,
@@ -1738,14 +1660,11 @@ function PexelsSearch({
   selected: string[];
   onSelect: (url: string) => void;
   onRemove: (url: string) => void;
+  onClear: () => void;
   totalSec: number | null;
   durationLoading: boolean;
   locale: string;
 }) {
-  const fmtDur = (sec: number) => {
-    const s = Math.round(sec);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  };
   const [query, setQuery] = useState("nature");
   const [results, setResults] = useState<PexelsVideo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1760,9 +1679,18 @@ function PexelsSearch({
       setError(null);
       try {
         const data = await searchPexelsVideos(q, p);
-        setResults((prev) =>
-          append ? [...prev, ...data.videos] : data.videos,
-        );
+        setResults((prev) => {
+          const base = append ? prev : [];
+          const seen = new Set(base.map((v) => v.id));
+                  return [
+            ...base,
+            ...data.videos.filter((v) => {
+              if (seen.has(v.id)) return false;
+              seen.add(v.id);
+              return true;
+            }),
+          ];
+        });
         setHasMore(!!data.nextPage && data.videos.length > 0);
       } catch (err: any) {
         setError(err?.message ?? "Search failed");
@@ -1923,73 +1851,16 @@ function PexelsSearch({
         </>
       )}
 
-      {/* Live playlist length summary (count + total) + coverage vs target */}
+
+
       {selected.length > 0 && (
-        <PlaylistSummary
+        <PlaylistTotals
           urls={selected}
           totalSec={totalSec}
-          durationLoading={durationLoading}
           ar={ar}
           locale={locale}
+          onClearAll={onClear}
         />
-      )}
-
-      {(selected.length > 0 || totalSec !== null || durationLoading) && (
-        <div className="flex flex-wrap items-center gap-3 px-1">
-          {selected.length > 0 && (
-            <>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold/10 px-2.5 py-0.5 text-[10px] font-semibold text-gold">
-                {selected.length}{" "}
-                {selected.length === 1
-                  ? ar
-                    ? "فيديو"
-                    : locale === "fr"
-                      ? "vidéo"
-                      : "video"
-                  : ar
-                    ? "فيديوهات"
-                    : locale === "fr"
-                      ? "vidéos"
-                      : "videos"}
-              </span>
-              {/* Clear all selected background videos */}
-              <button
-                onClick={() => selected.forEach(onRemove)}
-                className="inline-flex items-center gap-1 rounded-full border border-red-500/25 bg-red-500/5 px-2 py-0.5 text-[10px] font-medium text-red-400 transition hover:border-red-500/45 hover:bg-red-500/10"
-              >
-                <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
-              </button>
-            </>
-          )}
-          {(totalSec !== null || durationLoading) && (
-            <span className="inline-flex items-center gap-1.5 text-[10px] text-parchment-muted/70">
-              <svg
-                className="h-3 w-3 text-gold/60"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path strokeLinecap="round" d="M12 6v6l4 2" />
-              </svg>
-              {durationLoading
-                ? ar
-                  ? "… جاري قياس التلاوة"
-                  : locale === "fr"
-                    ? "… mesure de la récitation"
-                    : "… measuring recitation"
-                : ar
-                  ? `مدة الفيديو ≈ ${fmtDur(totalSec!)}`
-                  : locale === "fr"
-                    ? `Durée ≈ ${fmtDur(totalSec!)}`
-                    : `Video ≈ ${fmtDur(totalSec!)}`}
-            </span>
-          )}
-        </div>
       )}
     </div>
   );

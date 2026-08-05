@@ -17,19 +17,28 @@ export function fetchVideoDuration(url: string): Promise<number | null> {
 
   return new Promise((resolve) => {
     const v = document.createElement("video");
-    v.preload = "metadata";
-    v.muted = true;
-    v.src = url;
+    let finished = false;
     const done = (val: number | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
       _cache.set(url, val);
-      v.src = "";
+      v.removeAttribute("src");
       resolve(val);
     };
+    // Listeners attached before touching `src`, so fast CDN metadata events
+    // can never slip through and leave the sum stuck.
     v.addEventListener("loadedmetadata", () =>
       done(isFinite(v.duration) && v.duration > 0 ? v.duration : null),
     );
     v.addEventListener("error", () => done(null));
-    // Safety timeout — never hang the summary if the CDN is slow.
-    setTimeout(() => done(null), 15000);
+    // Safety timeout — never hang the UI if the CDN is slow.
+    const timer = setTimeout(() => done(null), 15000);
+    v.muted = true;
+    v.preload = "metadata";
+    v.src = url;
+    if (v.readyState >= 1 && isFinite(v.duration) && v.duration > 0) {
+      done(v.duration);
+    }
   });
 }
