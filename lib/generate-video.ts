@@ -48,7 +48,12 @@ export { isWebCodecsSupported };
 const FPS = 30;
 const LEAD_IN_SEC = 0; // No pre-roll silence — text/audio start together.
 const FALLBACK_DUR = 6;
-const MAX_BG_FRAMES = 900;
+const MAX_BG_FRAMES = 2400;
+/* Per-clip frame budget sent to the worker. Each selected video gets up to
+   this many full-rate (30fps) frames covering its WHOLE duration, sampled
+   evenly: `step = ceil(duration*30 / MAX_BG_FRAMES)`. 2400 ≈ 80 s per clip
+   at full 30fps — i.e. any chosen clip plays end-to-end, no truncation.
+   RAM cost scales with mobile (see profile-aware maxBgFrames below). */
 const AUDIO_CONCURRENCY = 6;
 
 const ASPECT: Record<string, [number, number]> = {
@@ -264,6 +269,7 @@ async function fetchVideoBytes(
    Upload mode: exactly one (the File). Library/Pexels: 1..N selected videoUrls.
    The worker decodes them all and crossfades between them in order.
 ══════════════════════════════════════════════════════════════ */
+
 async function getBackgroundBytesList(
   settings: VideoSettings,
   signal: AbortSignal,
@@ -282,12 +288,17 @@ async function getBackgroundBytesList(
             ? [settings.videoUrl]
             : [];
       if (!urls.length) return [];
-      // Fetch all in parallel; keep order. Drop failed ones (never emit null).
-      const buffers = await Promise.all(
-        urls.map((u) => fetchVideoBytes(u, signal)),
-      );
-      if (signal.aborted) return [];
-      return buffers.filter((b): b is ArrayBuffer => b !== null);
+      // Fetch in playlist order, one at a time (predictable bandwidth). The
+      // decode budget per video is what limits playlist coverage, not the
+      // source list — trimming it here just hides the real fix, so DON'T.
+      const out: ArrayBuffer[] = [];
+      for (const u of urls) {
+        const b = await fetchVideoBytes(u, signal);
+        if (signal.aborted) return [];
+        if (b === null) continue; // unreachable file: skip, keep going
+        out.push(b);
+      }
+      return out;
     }
   } catch (err) {
     if (signal.aborted) return [];
@@ -670,6 +681,11 @@ export async function generateVideo(params: {
     /* ── 5. Hand everything off to the Worker. ─────────────────── */
     log("Starting encoder (background thread)…", 42);
 
+    /* Per-clip frame budget, sampled evenly across each clip's real length.
+       Desktop: 2400 frames = 80s at full 30fps (covers virtually any pick).
+       Mobile drops to 1200 (≈40s @30fps) and 720p output so RAM stays sane. */
+    const maxBgFrames = profile.isLowPower ? 1200 : MAX_BG_FRAMES;
+
     const segments: WorkerSegment[] = buildSegments(prepared);
 
     const blob = await runWorkerEncode({
@@ -685,7 +701,7 @@ export async function generateVideo(params: {
       segments,
       ayahFrameBitmaps,
       bgVideoBytes: bgVideoBytesList,
-      maxBgFrames: MAX_BG_FRAMES,
+      maxBgFrames,
       fullAudioTrack: fullTrack,
       transitionStyle: settings.transitionStyle,
       latencyMode: profile.latencyMode,
@@ -760,7 +776,20 @@ function runWorkerEncode(opts: {
 
     worker.onerror = (e) => {
       cleanup();
-      reject(new Error(`Worker error: ${e.message}`));
+      // An ErrorEvent (script threw) carries file/line; a bare Event or a
+      // module-load failure often has neither, but some browsers expose
+      // `.error` — serialize everything we can find so we never guess.
+      const ev = e as any;
+      const parts: string[] = [];
+      if (ev.message) parts.push(String(ev.message));
+      if (ev.filename) parts.push(`${ev.filename.split("/").pop()}:${ev.lineno}:${ev.colno}`);
+      if (ev.error) parts.push(ev.error?.stack || String(ev.error));
+      const detail =
+        parts.join(" · ") ||
+        `script load failed (${e.type ?? "error"}) — likely a stale chunk; wipe .next and restart`;
+      reject(new Error(`Worker error: ${detail}`));
+      // Also log the raw event for deep inspection in DevTools.
+      console.error("[worker.onerror] raw event:", e);
     };
 
     const startMsg: WorkerInMessage = {
@@ -788,7 +817,7 @@ function runWorkerEncode(opts: {
     const transferList: Transferable[] = [
       opts.fullAudioTrack.buffer as ArrayBuffer,
       ...opts.ayahFrameBitmaps,
-      ...opts.bgVideoBytes, // transfer every background video's bytes
+      ...opts.bgVideoBytes,
     ];
 
     worker.postMessage(startMsg, transferList);

@@ -38,8 +38,11 @@ import {
   QUALITY_HIGH,
   Input,
   BlobSource,
+  BufferSource,
   CanvasSink,
   ALL_FORMATS,
+  type WrappedCanvas,
+  type InputVideoTrack,
 } from "mediabunny";
 
 /* ── Message protocol ────────────────────────────────────────── */
@@ -93,6 +96,24 @@ export type WorkerOutMessage =
 
 let aborted = false;
 
+// If the worker's own module init or any async path throws outside of
+// runEncode, main-thread onerror gets an empty Event. Surface everything.
+self.addEventListener("error", (e) => {
+  console.error("[worker uncaught]", e);
+  post({
+    type: "error",
+    message: `uncaught in worker: ${(e as ErrorEvent)?.message ?? String(e)}`,
+  });
+});
+self.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
+  console.error("[worker unhandledrejection]", e.reason);
+  const r = e.reason;
+  post({
+    type: "error",
+    message: `unhandled rejection in worker: ${r?.stack || r?.message || String(r)}`,
+  });
+});
+
 self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
   const msg = e.data;
   if (msg.type === "abort") {
@@ -123,6 +144,23 @@ type StartPayload = Extract<WorkerInMessage, { type: "start" }>["payload"];
 
 const FALLBACK_BG_COLOR = "#0b0b0f";
 
+/* Pull a canvas from the track at timestamp `t`, via a fresh sink each
+   time. Only ever called for the few seam frames (~10 per crossfade), so
+   the per-call seek cost is irrelevant. Returns null if no frame. */
+async function grabFrameAt(
+  track: InputVideoTrack,
+  cw: number,
+  ch: number,
+  t: number,
+): Promise<ImageBitmap | null> {
+  const sink = new CanvasSink(track, { width: cw, height: ch, fit: "cover" });
+  const r: WrappedCanvas | null = await sink.getCanvas(t).catch(() => null);
+  if (!r) return null;
+  return createImageBitmap(r.canvas as OffscreenCanvas, {
+    premultiplyAlpha: "premultiply",
+  });
+}
+
 async function decodeBackgroundFrames(
   bytes: ArrayBuffer,
   cw: number,
@@ -131,50 +169,63 @@ async function decodeBackgroundFrames(
   maxFrames: number,
   onProgress: (done: number, total: number) => void,
 ): Promise<ImageBitmap[]> {
+  let input: Input | null = null;
   try {
-    const input = new Input({
-      formats: ALL_FORMATS,
-      source: new BlobSource(new Blob([bytes])),
-    });
+    // BufferSource = whole file already in RAM, so mediabunny seeks freely
+    // (mp4 moov may trail mdat on stock clips) and reports FULL duration.
+    input = new Input({ formats: ALL_FORMATS, source: new BufferSource(bytes) });
 
     const videoTrack = await input.getPrimaryVideoTrack();
     if (!videoTrack || !(await videoTrack.canDecode())) {
-      console.warn("[worker] background video track missing or undecodable");
+      console.warn(`[bg] ${(bytes.byteLength / 1e6).toFixed(1)}MB: no video track / not decodable`);
       return [];
     }
 
-    const rawDuration = await videoTrack.computeDuration();
-    const safeDuration =
-      rawDuration && isFinite(rawDuration) && rawDuration > 0
-        ? rawDuration
-        : 10;
-    const uniqueFrameCount = Math.max(1, Math.ceil(safeDuration * renderFps));
-    // Decode up to maxFrames unique frames; looping repeats them seamlessly
-    // from the start, so no need to cap against the total output length here.
-    const count = Math.min(uniqueFrameCount, maxFrames);
-
-    const sink = new CanvasSink(videoTrack, {
-      width: cw,
-      height: ch,
-      fit: "cover",
-    });
-    const frames: ImageBitmap[] = [];
-
-    for await (const result of sink.canvases(0, safeDuration)) {
-      if (aborted) break;
-      if (!result) continue;
-      frames.push(await createImageBitmap(result.canvas as OffscreenCanvas, { premultiplyAlpha: "premultiply" }));
-      if (frames.length % 15 === 0) onProgress(frames.length, count);
-      if (frames.length >= count) break;
+    // Compute exact playable duration; fall back to container metadata.
+    let duration = await videoTrack.computeDuration();
+    if (!isFinite(duration) || duration <= 0) {
+      const meta = await videoTrack.getDurationFromMetadata().catch(() => null);
+      duration = meta ?? 0;
+    }
+    if (!isFinite(duration) || duration <= 0) {
+      console.warn(`[bg] ${(bytes.byteLength / 1e6).toFixed(1)}MB: no readable duration`);
+      return [];
     }
 
+    // Sampling: keep 1 of every `step` source frames covering [0, duration)
+    // so the clip's whole timeline fits in `maxFrames` real bitmaps. This
+    // keeps decode work near the budget instead of exploding with length.
+    const step = Math.max(1, Math.ceil((duration * renderFps) / maxFrames));
+    const sink = new CanvasSink(videoTrack, { width: cw, height: ch, fit: "cover" });
+    const frames: ImageBitmap[] = [];
+    let i = 0;
+    for await (const result of sink.canvases(0, duration)) {
+      if (aborted || !result) break;
+      if (i % step === 0) {
+        frames.push(
+          await createImageBitmap(result.canvas as OffscreenCanvas, {
+            premultiplyAlpha: "premultiply",
+          }),
+        );
+        if (frames.length % 10 === 0) onProgress(frames.length, maxFrames);
+        if (frames.length >= maxFrames) break;
+      }
+      i++;
+    }
+    console.log(
+      `[bg] ${(bytes.byteLength / 1e6).toFixed(1)}MB · ${duration.toFixed(1)}s · step=${step} → ${frames.length} frames`,
+    );
     return frames;
   } catch (err) {
     console.warn(
-      "[worker] background decode failed, falling back to solid color:",
-      err,
+      `[bg] ${(bytes.byteLength / 1e6).toFixed(1)}MB: decode failed`,
+      err instanceof Error ? err.stack ?? err.message : err,
     );
     return [];
+  } finally {
+    // Worker is one-shot; disposal releases the demuxer but MUST NOT touch
+    // the decoded bitmaps, which outlive this scope.
+    try { await input?.dispose(); } catch { /* ignore */ }
   }
 }
 
@@ -276,11 +327,13 @@ async function runEncode(payload: StartPayload) {
      are strung together end-to-end: video 1 fully, then video 2, etc.,
      with a quick crossfade at each seam. The FINAL video loops if the
      whole playlist is shorter than the output. ────────────────────── */
-  const videoCount = bgVideoBytes.length;
-  const perVideoCap = Math.max(
-    1,
-    Math.floor(maxBgFrames / Math.max(1, videoCount)),
-  );
+   const videoCount = bgVideoBytes.length;
+   /* Per-clip budget: same for EVERY clip, NOT divided by count. Each video
+      gets up to `maxBgFrames` frames (= its whole playable span, sampled
+      evenly once it outgrows the budget). playlist of 5×60s clips ⇒ work
+      decodes 300 sampled frames from each one (skip ≈6 source frames) — full
+      coverage, no mini-loops, and the seams stay clean. */
+   const perVideoCap = Math.max(1, Math.floor(maxBgFrames));
   const decodedCounts = new Array<number>(videoCount).fill(0);
   const bgFramesPromise: Promise<ImageBitmap[][]> = videoCount
     ? Promise.all(
@@ -350,9 +403,26 @@ async function runEncode(payload: StartPayload) {
   /* ── Wait for background frames (usually already done). ───────── */
   post({ type: "progress", msg: "Finalising background…", pct: 54 });
   const bgPlaylist = await bgFramesPromise;
-  const bgLen = bgPlaylist.map((l) => l.length);
-  const hasBg = bgLen.some((n) => n > 0);
+  console.log(`[bg] decoded per clip: [${bgPlaylist.map((l) => l.length).join(", ")}]`);
+  /* Keep only clips that actually decoded ≥1 frame. bgCum/bgLen MUST stay
+     in lockstep with the array the compositor indexes into; that lock-step
+     is what used to re-play clip 0 forever. */
+  const usable = bgPlaylist.filter((l) => l.length > 0);
+  const bgLen = usable.map((l) => l.length);
+
+  // Real playable length per clip = number of decoded frames, MINUS the tail
+  // we donate to the seam crossfade with the NEXT clip. 0 when alone. This
+  // is THE key that keeps every clip in its own slot even when sampling
+  // makes bgLen non-uniform (e.g. 180 frames of one 60s clip, then 60 of a
+  // 20s clip). `trackOf` below reads off these entries.
   const seamFrames = Math.min(10, Math.round(renderFps / 3)); // short crossfade between playlist items
+  const effLen = bgLen.map((len, i) =>
+    Math.max(1, bgLen.length > 1 && i < bgLen.length - 1 ? len - seamFrames : len),
+  );
+  const bgCum: number[] = [0];
+  for (const n of effLen) bgCum.push(bgCum[bgCum.length - 1] + n);
+  const bgTotal = bgCum[bgCum.length - 1] || 1;
+  const hasBg = bgLen.length > 0;
   if (aborted) {
     bgPlaylist.flat().forEach((b) => b.close());
     throw new DOMException("Aborted", "AbortError");
@@ -408,34 +478,35 @@ async function runEncode(payload: StartPayload) {
       // ── Render unique frame content (once per renderFps frame) ───
       ctx.clearRect(0, 0, cw, ch);
       if (hasBg) {
-        /* Ordered playlist compositing: walk `globalRenderIdx` through
-           each video's frame list in turn, looping the LAST video if the
-           output outlives every item, and crossfading at each seam. */
-        let cursor = globalRenderIdx;
-        let i = 0;
-        while (i < bgLen.length && cursor >= bgLen[i]) {
-          cursor -= bgLen[i];
-          i++;
+        /* Deterministic wallpaper: `bgCum[i]` is clip i's START in the
+           output timeline, `bgTotal` is the LCM span of one full pass
+           (everything before any clip loops). Binary-search → (i, cursor).
+           `effLen[i] = bgLen[i] − seamFrames` for all but the last clip,
+           reserving each clip's tail as the crossfade into the NEXT one,
+           so a 6-second clip never bleeds into its successor's slot. */
+        const pos = globalRenderIdx % bgTotal;
+        let l = 0, r = bgCum.length - 2;
+        while (l < r) {
+          const mid = (l + r) >> 1;
+          if (pos >= bgCum[mid + 1]) l = mid + 1;
+          else r = mid;
         }
-        if (i >= bgLen.length) {
-          // Output longer than the whole playlist — loop the last video.
-          i = bgLen.length - 1;
-          cursor = cursor % Math.max(1, bgLen[i]);
-        }
-        // Skip zero-length lists (a failed video) forward to one that has frames.
-        while (bgLen[i] === 0 && i < bgLen.length - 1) i++;
+        const i = l;
+        const cursor = pos - bgCum[i];
 
-        const cur = bgPlaylist[i][cursor % bgLen[i]];
+        const cur = usable[i][cursor];
         ctx.drawImage(cur, 0, 0, cw, ch);
 
-        // Crossfade to the NEXT playlist item over the current one's tail.
-        // (Skipped while the final item is looping to fill extra length.)
-        const nextHasFrames = i + 1 < bgLen.length && bgLen[i + 1] > 0;
-        if (nextHasFrames && cursor >= bgLen[i] - seamFrames) {
-          const t = cursor - (bgLen[i] - seamFrames); // 0..seamFrames-1
+        // `effLen` already reserved the tail; the current "slot" is ended
+        // exactly at bgLen[i] − seamFrames, any frame past it belongs to
+        // the crossfade with the NEXT clip (or clip0 on the wrap loop).
+        const nextI = i + 1 < bgLen.length ? i + 1 : 0;
+        const withinTail = cursor >= bgLen[i] - seamFrames;
+        if (nextI !== i && withinTail && transitionStyle !== "none") {
+          const t = cursor - (bgLen[i] - seamFrames);
           const a = Math.min(1, (t + 1) / (seamFrames + 1));
           ctx.globalAlpha = a;
-          ctx.drawImage(bgPlaylist[i + 1][0], 0, 0, cw, ch);
+          ctx.drawImage(usable[nextI][0], 0, 0, cw, ch);
           ctx.globalAlpha = 1;
         }
       } else if (bgDecodeFailed) {
