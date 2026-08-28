@@ -122,8 +122,7 @@ export const metadata: Metadata = {
     canonical: BASE_URL,
   },
   verification: {
-    // Add your Google Search Console token here when ready:
-    // google: "YOUR_TOKEN",
+    google: "google4868c8b9bf5583c9",
   },
 };
 
