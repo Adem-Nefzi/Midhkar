@@ -4,13 +4,14 @@
  *
  * New in this version:
  *  - drawBackground supports "color" mode (solid/gradient via bgColor/bgColorSecondary/bgGradientAngle)
+ *  - drawBackground supports "pattern" mode (procedural Islamic geometric patterns)
  *  - drawAyahFrame respects textGlow and textOutline settings
  *  - drawFrameDecoration draws "corners" | "full" | "arch" overlays
  */
 
-import { PLATFORMS } from "@/lib/quran";
 import type { Ayah, Surah } from "@/lib/quran";
 import type { VideoSettings } from "@/lib/types";
+import { drawIslamicPattern } from "@/lib/islamic-patterns";
 
 /* ── Text block cache ────────────────────────────────────────── */
 
@@ -22,7 +23,7 @@ function cacheKey(
   s: VideoSettings,
   maxW: number,
 ): string {
-  return `${ayah?.numberInSurah ?? "none"}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}`;
+  return `${ayah?.numberInSurah ?? "none"}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.translationLang}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}`;
 }
 
 /* ── Font size map ───────────────────────────────────────────── */
@@ -64,61 +65,63 @@ export function drawBackground(
   w: number,
   h: number,
   bgId: string,
-  videoEl: HTMLVideoElement | null,
   overlayPct: number,
   settings?: Pick<
     VideoSettings,
-    "bgColor" | "bgColorSecondary" | "bgGradientAngle"
+    | "bgColor"
+    | "bgColorSecondary"
+    | "bgGradientAngle"
+    | "patternSeed"
+    | "patternFamily"
+    | "patternPalette"
+    | "patternDensity"
+    | "patternScale"
+    | "patternFillMode"
   >,
 ): void {
-  const isVideo =
-    (bgId === "upload" || bgId === "library" || bgId === "pexels") &&
-    videoEl &&
-    videoEl.readyState >= 2;
+  if (bgId === "pattern" && settings) {
+    // Procedural Islamic geometric pattern
+    drawIslamicPattern(ctx, w, h, {
+      seed: settings.patternSeed ?? 108,
+      family: settings.patternFamily ?? "star",
+      paletteId: settings.patternPalette ?? "night-gold",
+      density: settings.patternDensity ?? 2,
+      scale: settings.patternScale ?? 1,
+      fillMode: settings.patternFillMode ?? "glow",
+    });
+  } else if (bgId === "color" && settings) {
+    // Custom solid / gradient background
+    const angle = (settings.bgGradientAngle ?? 135) * (Math.PI / 180);
+    const x1 = w / 2 + Math.cos(angle + Math.PI) * w;
+    const y1 = h / 2 + Math.sin(angle + Math.PI) * h;
+    const x2 = w / 2 + Math.cos(angle) * w;
+    const y2 = h / 2 + Math.sin(angle) * h;
+    const g = ctx.createLinearGradient(x1, y1, x2, y2);
+    g.addColorStop(0, settings.bgColor ?? "#09090f");
+    g.addColorStop(1, settings.bgColorSecondary ?? "#1a0e00");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    // Default: dark gradient with subtle gold glow
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, "#09090f");
+    g.addColorStop(0.5, "#120d03");
+    g.addColorStop(1, "#09090f");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
 
-  if (isVideo) {
-    try {
-      ctx.drawImage(videoEl!, 0, 0, w, h);
-    } catch {
-      /* fall through */
-    }
-  }
-
-  if (!isVideo) {
-    if (bgId === "color" && settings) {
-      // Custom solid / gradient background
-      const angle = (settings.bgGradientAngle ?? 135) * (Math.PI / 180);
-      const x1 = w / 2 + Math.cos(angle + Math.PI) * w;
-      const y1 = h / 2 + Math.sin(angle + Math.PI) * h;
-      const x2 = w / 2 + Math.cos(angle) * w;
-      const y2 = h / 2 + Math.sin(angle) * h;
-      const g = ctx.createLinearGradient(x1, y1, x2, y2);
-      g.addColorStop(0, settings.bgColor ?? "#09090f");
-      g.addColorStop(1, settings.bgColorSecondary ?? "#1a0e00");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    } else {
-      // Default: dark gradient with subtle gold glow
-      const g = ctx.createLinearGradient(0, 0, w, h);
-      g.addColorStop(0, "#09090f");
-      g.addColorStop(0.5, "#120d03");
-      g.addColorStop(1, "#09090f");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-
-      const glow = ctx.createRadialGradient(
-        w / 2,
-        h / 2,
-        0,
-        w / 2,
-        h / 2,
-        Math.max(w, h) * 0.55,
-      );
-      glow.addColorStop(0, "rgba(212,175,55,0.07)");
-      glow.addColorStop(1, "transparent");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-    }
+    const glow = ctx.createRadialGradient(
+      w / 2,
+      h / 2,
+      0,
+      w / 2,
+      h / 2,
+      Math.max(w, h) * 0.55,
+    );
+    glow.addColorStop(0, "rgba(212,175,55,0.07)");
+    glow.addColorStop(1, "transparent");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
   }
 
   if (overlayPct > 0) {
@@ -287,15 +290,12 @@ function measureTextBlock(
   return result;
 }
 
-const ANIM_DUR_FRAMES = 15; // ~0.5s at 30fps
-
 export function drawAyahFrame(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   ayah: Ayah | null,
   surah: Surah,
   s: VideoSettings,
-  platform: (typeof PLATFORMS)[0],
   animProgress: number = 1,
 ): void {
   const w = canvas.width;
@@ -440,16 +440,123 @@ export function drawAyahFrame(
   }
 }
 
-/* ── Canvas → PNG bytes ──────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   Overlay + watermark + full-frame preview composition
+   (shared by the encoder pre-render, the live preview and the
+   landing hero — kept here so none of them import the heavy
+   generate-video module)
+ ══════════════════════════════════════════════════════════════ */
 
-export async function canvasToPNG(
+export function drawOverlayStyle(
+  ctx: CanvasRenderingContext2D,
+  cw: number,
+  ch: number,
+  style: VideoSettings["overlayStyle"],
+  intensityPct: number,
+): void {
+  if (style === "none" || intensityPct <= 0) return;
+  const alpha = Math.min(0.85, (intensityPct / 100) * 0.85);
+  let g: CanvasGradient;
+  if (style === "radial") {
+    g = ctx.createRadialGradient(
+      cw / 2,
+      ch / 2,
+      Math.min(cw, ch) * 0.2,
+      cw / 2,
+      ch / 2,
+      Math.max(cw, ch) * 0.7,
+    );
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, `rgba(0,0,0,${alpha})`);
+  } else {
+    g = ctx.createLinearGradient(0, 0, 0, ch);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(0.55, "rgba(0,0,0,0)");
+    g.addColorStop(1, `rgba(0,0,0,${alpha})`);
+  }
+  ctx.save();
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.restore();
+}
+
+export function drawWatermark(
+  ctx: CanvasRenderingContext2D,
+  cw: number,
+  ch: number,
+  text: string,
+): void {
+  ctx.save();
+  ctx.font = `${Math.round(ch * 0.022)}px sans-serif`;
+  ctx.fillStyle = "rgba(245,240,232,0.55)";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  const pad = Math.round(ch * 0.025);
+  ctx.fillText(text, cw - pad, ch - pad);
+  ctx.restore();
+}
+
+export function renderFullFrame(
+  ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
-): Promise<Uint8Array> {
-  const blob = await new Promise<Blob>((res, rej) =>
-    canvas.toBlob(
-      (b) => (b ? res(b) : rej(new Error("canvas.toBlob returned null"))),
-      "image/png",
-    ),
-  );
-  return new Uint8Array(await blob.arrayBuffer());
+  ayah: Ayah | null,
+  surah: Surah,
+  settings: VideoSettings,
+  videoEl: HTMLVideoElement | null,
+  animProgress: number = 1,
+): void {
+  const { width: w, height: h } = canvas;
+  ctx.clearRect(0, 0, w, h);
+
+  // Must mirror renderAyahOverlays' source check so the live preview and
+  // the encoder agree when a "video" background has no source yet.
+  const hasBgVideo =
+    settings.background === "upload"
+      ? !!settings.uploadedVideoUrl
+      : settings.background === "library" || settings.background === "pexels"
+        ? (settings.videoUrls?.length ?? 0) > 0 || !!settings.videoUrl
+        : false;
+
+  if (hasBgVideo && videoEl && videoEl.readyState >= 2) {
+    try {
+      ctx.drawImage(videoEl, 0, 0, w, h);
+    } catch {
+      drawBackground(ctx, w, h, settings.background, 0, settings);
+    }
+  } else {
+    drawBackground(ctx, w, h, settings.background, 0, settings);
+  }
+
+  if (settings.bgOverlay > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${settings.bgOverlay / 100})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+  drawOverlayStyle(ctx, w, h, settings.overlayStyle, settings.bgOverlay);
+  if (ayah) {
+    ctx.save();
+    if (
+      animProgress < 1 &&
+      settings.transitionStyle &&
+      settings.transitionStyle !== "none"
+    ) {
+      if (settings.transitionStyle === "fade") {
+        ctx.globalAlpha = animProgress;
+      } else if (settings.transitionStyle === "slide") {
+        ctx.globalAlpha = animProgress;
+        const offset = (1 - animProgress) * 40;
+        ctx.translate(0, offset);
+      } else if (settings.transitionStyle === "scale") {
+        ctx.globalAlpha = animProgress;
+        const scale = 0.95 + animProgress * 0.05;
+        ctx.translate(w / 2, h / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-w / 2, -h / 2);
+      }
+    }
+    drawAyahFrame(ctx, canvas, ayah, surah, settings, 1);
+    ctx.restore();
+  }
+  if (settings.showWatermark && settings.watermarkText?.trim()) {
+    drawWatermark(ctx, w, h, settings.watermarkText);
+  }
 }

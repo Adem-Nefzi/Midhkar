@@ -1,76 +1,79 @@
 /**
  * fonts-ready.ts
  *
- * Ensures all Arabic + Latin fonts used in canvas rendering are fully loaded
- * before the canvas tries to use them. This prevents the "fallback font" issue
- * on mobile devices where web fonts load asynchronously.
+ * Ensures the fonts used by canvas rendering are fully loaded before the
+ * canvas draws text with them. Prevents the "fallback font" issue on
+ * mobile devices where web fonts load asynchronously.
+ *
+ * Selective: only the Arabic + translation families actually referenced by
+ * the passed settings are fetched, so generation no longer downloads all
+ * ~35 font files regardless of what the user chose. No argument = the
+ * default pair (Amiri + Inter). Results are cached per family set.
  */
 
-const FONTS_TO_ENSURE = [
-  // Arabic fonts (with weights used by the canvas)
-  { family: "Amiri", weight: "400" },
-  { family: "Amiri", weight: "700" },
-  { family: "Scheherazade New", weight: "400" },
-  { family: "Scheherazade New", weight: "700" },
-  { family: "Noto Naskh Arabic", weight: "400" },
-  { family: "Noto Naskh Arabic", weight: "700" },
-  { family: "Noto Kufi Arabic", weight: "400" },
-  { family: "Noto Kufi Arabic", weight: "700" },
-  { family: "Cairo", weight: "400" },
-  { family: "Cairo", weight: "600" },
-  { family: "Cairo", weight: "700" },
-  { family: "Tajawal", weight: "400" },
-  { family: "Tajawal", weight: "700" },
-  { family: "Lateef", weight: "400" },
-  { family: "Lateef", weight: "700" },
-  { family: "Reem Kufi", weight: "400" },
-  { family: "Reem Kufi", weight: "700" },
-  // Latin fonts (web via next/font, or instant system via FontFace fallback)
-  { family: "Inter", weight: "400" },
-  { family: "Inter", weight: "600" },
-  { family: "Poppins", weight: "400" },
-  { family: "Poppins", weight: "500" },
-  { family: "Poppins", weight: "600" },
-  { family: "JetBrains Mono", weight: "400" },
-  { family: "JetBrains Mono", weight: "500" },
-  { family: "Georgia", weight: "400" },   // instant system everywhere
-  { family: "Georgia", weight: "700" },   // instant system everywhere
-  { family: "Noto Naskh Arabic", weight: "400" }, // ensure loaded alongside Amiri
-  { family: "Lato", weight: "400" },
-  { family: "Lato", weight: "700" },
-  { family: "Playfair Display", weight: "400" },
-  { family: "Playfair Display", weight: "600" },
-  { family: "Merriweather", weight: "400" },
-  { family: "Merriweather", weight: "700" },
-  { family: "Nunito", weight: "400" },
-  { family: "Nunito", weight: "600" },
-];
+type FontSpec = {
+  fontFamily?: string;
+  translationFontFamily?: string;
+};
 
-let _fontsReady: Promise<void> | null = null;
+/* Weights the canvas actually draws with, per family. Families absent
+   from this map are system fonts (e.g. Georgia) — nothing to fetch. */
+const WEIGHTS: Record<string, string[]> = {
+  Amiri: ["400", "700"],
+  "Scheherazade New": ["400", "700"],
+  "Noto Naskh Arabic": ["400", "700"],
+  "Noto Kufi Arabic": ["400", "700"],
+  Cairo: ["400", "600", "700"],
+  Tajawal: ["400", "700"],
+  Lateef: ["400", "700"],
+  "Reem Kufi": ["400", "700"],
+  Inter: ["400", "600"],
+  Poppins: ["400", "500", "600"],
+  "JetBrains Mono": ["400", "500"],
+  Lato: ["400", "700"],
+  "Playfair Display": ["400", "600"],
+  Merriweather: ["400", "700"],
+  Nunito: ["400", "600"],
+};
 
-/**
- * Returns a promise that resolves when ALL canvas-relevant fonts are loaded.
- * Cached so repeated calls don't re-trigger font loading checks.
- */
-export function ensureFontsReady(): Promise<void> {
-  if (_fontsReady) return _fontsReady;
+function familyFromStack(stack: string | undefined): string | null {
+  if (!stack) return null;
+  const quoted = stack.match(/['"]([^'"]+)['"]/);
+  if (quoted) return quoted[1];
+  const first = stack.split(",")[0].trim();
+  return first || null;
+}
 
-  _fontsReady = (async () => {
+const _cache = new Map<string, Promise<void>>();
+
+export function ensureFontsReady(settings?: FontSpec): Promise<void> {
+  const families = [
+    familyFromStack(settings?.fontFamily) ?? "Amiri",
+    familyFromStack(settings?.translationFontFamily) ?? "Inter",
+  ];
+  const key = [...new Set(families)].sort().join("|");
+  const cached = _cache.get(key);
+  if (cached) return cached;
+
+  const promise = (async () => {
     if (typeof document === "undefined") return;
-
-    // First wait for the document's font set to be ready
-    await (document as any).fonts.ready;
-
-    // Then explicitly load each font to make sure it's available for canvas
     const fontSet = (document as any).fonts;
     if (!fontSet?.load) return;
 
-    await Promise.all(
-      FONTS_TO_ENSURE.map(({ family, weight }) =>
-        fontSet.load(`${weight} 16px "${family}"`).catch(() => {}),
-      ),
-    );
+    // First wait for the document's font set to be ready
+    await fontSet.ready;
+
+    const jobs: Promise<unknown>[] = [];
+    for (const family of families) {
+      const weights = WEIGHTS[family];
+      if (!weights) continue; // system font — instant, nothing to fetch
+      for (const weight of weights) {
+        jobs.push(fontSet.load(`${weight} 16px "${family}"`).catch(() => {}));
+      }
+    }
+    await Promise.all(jobs);
   })();
 
-  return _fontsReady;
+  _cache.set(key, promise);
+  return promise;
 }

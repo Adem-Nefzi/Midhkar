@@ -17,9 +17,9 @@
  */
 
 import {
-  getAudioContext,
   decodeAndResample,
   silenceSamples,
+  acquireAudioContext,
   releaseAudioContext,
   SAMPLE_RATE,
   CHANNELS,
@@ -27,14 +27,19 @@ import {
 } from "./webcodecs-muxer";
 
 import {
-  PLATFORMS,
   getQuranApiAudioUrl,
   getEveryayahAudioUrl,
 } from "@/lib/quran";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
-import type { VideoSettings, GenLog } from "@/lib/types";
-import { drawAyahFrame, drawBackground } from "@/lib/canva-utils";
+import type { VideoSettings, Platform } from "@/lib/types";
+import { drawAyahFrame, drawBackground, drawOverlayStyle, drawWatermark } from "@/lib/canva-utils";
 import { ensureFontsReady } from "./fonts-ready";
+import { getCachedVideoDuration } from "./video-meta";
+import {
+  getDeviceProfile,
+  getOutputResolution,
+  getVideoBitrate,
+} from "./device-profile";
 import type {
   WorkerInMessage,
   WorkerOutMessage,
@@ -46,7 +51,7 @@ export { isWebCodecsSupported };
 /* ── Constants ───────────────────────────────────────────────── */
 
 const FPS = 30;
-const LEAD_IN_SEC = 0; // No pre-roll silence — text/audio start together.
+// No pre-roll silence — text/audio start at the same timestamp (invariant).
 const FALLBACK_DUR = 6;
 const MAX_BG_FRAMES = 2400;
 /* Per-clip frame budget sent to the worker. Each selected video gets up to
@@ -56,63 +61,9 @@ const MAX_BG_FRAMES = 2400;
    RAM cost scales with mobile (see profile-aware maxBgFrames below). */
 const AUDIO_CONCURRENCY = 6;
 
-const ASPECT: Record<string, [number, number]> = {
-  "16:9": [1280, 720],
-  "9:16": [720, 1280],
-  "1:1": [1080, 1080],
-};
-
-/* ══════════════════════════════════════════════════════════════
-   Device-adaptive quality profile (unchanged from v7)
-══════════════════════════════════════════════════════════════ */
-
-export interface DeviceProfile {
-  isLowPower: boolean;
-  bitrateScale: number;
-  latencyMode: "quality" | "realtime";
-}
-
-export function getDeviceProfile(): DeviceProfile {
-  if (typeof navigator === "undefined") {
-    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime" };
-  }
-  const ua = navigator.userAgent || "";
-  const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
-  const cores = navigator.hardwareConcurrency || 4;
-  const mem = (navigator as any).deviceMemory as number | undefined;
-
-  const isLowPower =
-    isMobileUA && (cores <= 6 || (mem !== undefined && mem <= 4));
-
-  return {
-    isLowPower,
-    bitrateScale: isLowPower ? 0.7 : 1,
-    latencyMode: "realtime",
-  };
-}
-
-function getOutputResolution(
-  platform: (typeof PLATFORMS)[0],
-): [number, number] {
-  return ASPECT[platform.aspect] ?? [720, 1280];
-}
-
-function getVideoBitrate(
-  cw: number,
-  ch: number,
-  profile: DeviceProfile,
-): number {
-  const pixels = cw * ch;
-  let base: number;
-  if (pixels >= 1080 * 1080) base = 3_500_000;
-  else if (pixels >= 1280 * 720) base = 3_000_000;
-  else base = 2_500_000;
-  return Math.round(base * profile.bitrateScale);
-}
-
 /* ══════════════════════════════════════════════════════════════
    Concurrent-limited parallel map (unchanged)
-══════════════════════════════════════════════════════════════ */
+ ══════════════════════════════════════════════════════════════ */
 
 async function parallelMap<T, R>(
   items: T[],
@@ -140,9 +91,33 @@ async function parallelMap<T, R>(
 ══════════════════════════════════════════════════════════════ */
 
 const _audioCache = new Map<string, Float32Array>();
+/* LRU cap so a long browsing session can't grow the decoded-audio cache
+   without bound. Re-inserting on read keeps hot entries; the oldest entry
+   is evicted first. A miss just re-downloads, so eviction is always safe. */
+const AUDIO_CACHE_MAX = 300;
 
 function audioCacheKey(reciterNo: number, surah: number, ayah: number): string {
   return `${reciterNo}:${surah}:${ayah}`;
+}
+
+function audioCacheGet(key: string): Float32Array | undefined {
+  const hit = _audioCache.get(key);
+  if (hit !== undefined) {
+    // Refresh recency (Map keeps insertion order).
+    _audioCache.delete(key);
+    _audioCache.set(key, hit);
+  }
+  return hit;
+}
+
+function audioCacheSet(key: string, samples: Float32Array): void {
+  if (_audioCache.has(key)) _audioCache.delete(key);
+  _audioCache.set(key, samples);
+  while (_audioCache.size > AUDIO_CACHE_MAX) {
+    const oldest = _audioCache.keys().next().value;
+    if (oldest === undefined) break;
+    _audioCache.delete(oldest);
+  }
 }
 
 export async function prefetchAudio(
@@ -152,25 +127,30 @@ export async function prefetchAudio(
 ): Promise<void> {
   if (reciter.source !== "quranapi" || !reciter.quranApiNo) return;
 
-  await parallelMap(
-    ayahs,
-    async (ayah) => {
-      const key = audioCacheKey(
-        reciter.quranApiNo!,
-        surah.number,
-        ayah.numberInSurah,
-      );
-      if (_audioCache.has(key)) return;
+  acquireAudioContext();
+  try {
+    await parallelMap(
+      ayahs,
+      async (ayah) => {
+        const key = audioCacheKey(
+          reciter.quranApiNo!,
+          surah.number,
+          ayah.numberInSurah,
+        );
+        if (_audioCache.has(key)) return;
 
-      const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
-      const rawBuffer = await fetchAudioBuffer(urls);
-      if (rawBuffer) {
-        const samples = await decodeAndResample(rawBuffer);
-        if (samples) _audioCache.set(key, samples);
-      }
-    },
-    AUDIO_CONCURRENCY,
-  );
+        const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
+        const rawBuffer = await fetchAudioBuffer(urls);
+        if (rawBuffer) {
+          const samples = await decodeAndResample(rawBuffer);
+          if (samples) audioCacheSet(key, samples);
+        }
+      },
+      AUDIO_CONCURRENCY,
+    );
+  } finally {
+    releaseAudioContext();
+  }
 }
 
 export function clearAudioCache(): void {
@@ -196,6 +176,7 @@ export async function estimateTotalDurationSec({
   signal?: AbortSignal;
 }): Promise<number | null> {
   if (!ayahs.length) return 0;
+  acquireAudioContext();
   try {
     const durations = await parallelMap(
       ayahs,
@@ -204,11 +185,13 @@ export async function estimateTotalDurationSec({
         const key = reciter.quranApiNo
           ? audioCacheKey(reciter.quranApiNo, surah.number, ayah.numberInSurah)
           : "";
-        let samples = key ? (_audioCache.get(key) ?? null) : null;
+        let samples = key ? (audioCacheGet(key) ?? null) : null;
         if (!samples) {
           const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
           const raw = await fetchAudioBuffer(urls, signal);
           samples = raw ? await decodeAndResample(raw) : null;
+          // Feed the shared cache so prefetch/generation reuse this decode.
+          if (samples && key) audioCacheSet(key, samples);
         }
         if (!samples) return FALLBACK_DUR;
         return samples.length / SAMPLE_RATE;
@@ -273,11 +256,15 @@ async function fetchVideoBytes(
 async function getBackgroundBytesList(
   settings: VideoSettings,
   signal: AbortSignal,
-): Promise<ArrayBuffer[]> {
+): Promise<{ bytes: ArrayBuffer[]; durations: number[] }> {
   try {
     if (settings.background === "upload") {
-      if (!settings.uploadedVideoFile) return [];
-      return [await settings.uploadedVideoFile.arrayBuffer()];
+      if (!settings.uploadedVideoFile) return { bytes: [], durations: [] };
+      return {
+        bytes: [await settings.uploadedVideoFile.arrayBuffer()],
+        // Unknown without probing; the worker falls back to an even split.
+        durations: [0],
+      };
     }
     if (settings.background === "library" || settings.background === "pexels") {
       // Prefer the ordered playlist; fall back to the legacy single videoUrl.
@@ -287,24 +274,29 @@ async function getBackgroundBytesList(
           : settings.videoUrl
             ? [settings.videoUrl]
             : [];
-      if (!urls.length) return [];
+      if (!urls.length) return { bytes: [], durations: [] };
       // Fetch in playlist order, one at a time (predictable bandwidth). The
       // decode budget per video is what limits playlist coverage, not the
       // source list — trimming it here just hides the real fix, so DON'T.
       const out: ArrayBuffer[] = [];
+      const durs: number[] = [];
       for (const u of urls) {
         const b = await fetchVideoBytes(u, signal);
-        if (signal.aborted) return [];
+        if (signal.aborted) return { bytes: [], durations: [] };
         if (b === null) continue; // unreachable file: skip, keep going
         out.push(b);
+        // Keep durations in lockstep with the bytes that survived, so the
+        // worker's proportional budget split maps to the right clips.
+        const d = getCachedVideoDuration(u);
+        durs.push(d && isFinite(d) && d > 0 ? d : 0);
       }
-      return out;
+      return { bytes: out, durations: durs };
     }
   } catch (err) {
-    if (signal.aborted) return [];
+    if (signal.aborted) return { bytes: [], durations: [] };
     console.warn("[getBackgroundBytesList] failed:", err);
   }
-  return [];
+  return { bytes: [], durations: [] };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -315,27 +307,45 @@ async function renderAyahOverlays(
   prepared: { ayah: Ayah }[],
   surah: Surah,
   settings: VideoSettings,
-  platform: (typeof PLATFORMS)[0],
   cw: number,
   ch: number,
+  onBatch: (startIndex: number, bitmaps: ImageBitmap[]) => void,
   onProgress: (done: number, total: number) => void,
-): Promise<ImageBitmap[]> {
+): Promise<number> {
   const canvas = document.createElement("canvas");
   canvas.width = cw;
   canvas.height = ch;
   const ctx = canvas.getContext("2d")!;
 
-  const isStaticBg =
-    settings.background !== "upload" &&
-    settings.background !== "library" &&
-    settings.background !== "pexels";
-  const bitmaps: ImageBitmap[] = [];
+  // A "video" background with no actual source (empty playlist, nothing
+  // uploaded) degrades gracefully: bake the elegant default gradient into
+  // the overlay bitmaps instead of leaving them transparent over nothing.
+  const hasBgVideo =
+    settings.background === "upload"
+      ? !!settings.uploadedVideoUrl
+      : settings.background === "library" || settings.background === "pexels"
+        ? (settings.videoUrls?.length ?? 0) > 0 || !!settings.videoUrl
+        : false;
+  const isStaticBg = !hasBgVideo;
+
+  // Overlays stream to the worker in batches as they're rendered, so a
+  // long surah never piles up hundreds of full-res bitmaps on either side.
+  const OVERLAY_BATCH = 8;
+  let batch: ImageBitmap[] = [];
+  let batchStart = 0;
+
+  const flush = () => {
+    if (batch.length === 0) return;
+    onBatch(batchStart, batch);
+    batchStart += batch.length;
+    batch = [];
+  };
 
   for (let i = 0; i < prepared.length; i++) {
     ctx.clearRect(0, 0, cw, ch);
 
     if (isStaticBg) {
-      drawBackground(ctx, cw, ch, settings.background, null, 0, settings);
+      drawBackground(ctx, cw, ch, settings.background, 0, settings);
       if (settings.bgOverlay > 0) {
         ctx.fillStyle = `rgba(0,0,0,${settings.bgOverlay / 100})`;
         ctx.fillRect(0, 0, cw, ch);
@@ -345,141 +355,20 @@ async function renderAyahOverlays(
     // the decoded video frame + darkness overlay beneath it.
 
     drawOverlayStyle(ctx, cw, ch, settings.overlayStyle, settings.bgOverlay);
-    drawAyahFrame(ctx, canvas, prepared[i].ayah, surah, settings, platform);
+    drawAyahFrame(ctx, canvas, prepared[i].ayah, surah, settings);
     if (settings.showWatermark && settings.watermarkText?.trim()) {
       drawWatermark(ctx, cw, ch, settings.watermarkText);
     }
 
-    bitmaps.push(
+    batch.push(
       await createImageBitmap(canvas, { premultiplyAlpha: "none" }),
     );
+    if (batch.length >= OVERLAY_BATCH) flush();
     onProgress(i + 1, prepared.length);
   }
+  flush();
 
-  return bitmaps;
-}
-
-/* ── Overlay + watermark helpers (unchanged) ─────────────────── */
-
-function drawOverlayStyle(
-  ctx: CanvasRenderingContext2D,
-  cw: number,
-  ch: number,
-  style: VideoSettings["overlayStyle"],
-  intensityPct: number,
-): void {
-  if (style === "none" || intensityPct <= 0) return;
-  const alpha = Math.min(0.85, (intensityPct / 100) * 0.85);
-  let g: CanvasGradient;
-  if (style === "radial") {
-    g = ctx.createRadialGradient(
-      cw / 2,
-      ch / 2,
-      Math.min(cw, ch) * 0.2,
-      cw / 2,
-      ch / 2,
-      Math.max(cw, ch) * 0.7,
-    );
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, `rgba(0,0,0,${alpha})`);
-  } else {
-    g = ctx.createLinearGradient(0, 0, 0, ch);
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(0.55, "rgba(0,0,0,0)");
-    g.addColorStop(1, `rgba(0,0,0,${alpha})`);
-  }
-  ctx.save();
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.restore();
-}
-
-function drawWatermark(
-  ctx: CanvasRenderingContext2D,
-  cw: number,
-  ch: number,
-  text: string,
-): void {
-  ctx.save();
-  ctx.font = `${Math.round(ch * 0.022)}px sans-serif`;
-  ctx.fillStyle = "rgba(245,240,232,0.55)";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "bottom";
-  const pad = Math.round(ch * 0.025);
-  ctx.fillText(text, cw - pad, ch - pad);
-  ctx.restore();
-}
-
-/* ══════════════════════════════════════════════════════════════
-   renderFullFrame — kept for the live preview in StepGenerate (unchanged)
-══════════════════════════════════════════════════════════════ */
-
-export function renderFullFrame(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  ayah: Ayah | null,
-  surah: Surah,
-  settings: VideoSettings,
-  platform: (typeof PLATFORMS)[0],
-  videoEl: HTMLVideoElement | null,
-  bgBitmap?: ImageBitmap | null,
-  animProgress: number = 1,
-): void {
-  const { width: w, height: h } = canvas;
-  ctx.clearRect(0, 0, w, h);
-
-  const useVideoBg =
-    settings.background === "upload" ||
-    settings.background === "library" ||
-    settings.background === "pexels";
-  if (useVideoBg) {
-    if (bgBitmap) {
-      ctx.drawImage(bgBitmap, 0, 0, w, h);
-    } else if (videoEl) {
-      try {
-        ctx.drawImage(videoEl, 0, 0, w, h);
-      } catch {
-        /* not ready */
-      }
-    } else {
-      drawBackground(ctx, w, h, settings.background, null, 0, settings);
-    }
-  } else {
-    drawBackground(ctx, w, h, settings.background, null, 0, settings);
-  }
-
-  if (settings.bgOverlay > 0) {
-    ctx.fillStyle = `rgba(0,0,0,${settings.bgOverlay / 100})`;
-    ctx.fillRect(0, 0, w, h);
-  }
-  drawOverlayStyle(ctx, w, h, settings.overlayStyle, settings.bgOverlay);
-  if (ayah) {
-    ctx.save();
-    if (
-      animProgress < 1 &&
-      settings.transitionStyle &&
-      settings.transitionStyle !== "none"
-    ) {
-      if (settings.transitionStyle === "fade") {
-        ctx.globalAlpha = animProgress;
-      } else if (settings.transitionStyle === "slide") {
-        ctx.globalAlpha = animProgress;
-        const offset = (1 - animProgress) * 40;
-        ctx.translate(0, offset);
-      } else if (settings.transitionStyle === "scale") {
-        ctx.globalAlpha = animProgress;
-        const scale = 0.95 + animProgress * 0.05;
-        ctx.translate(w / 2, h / 2);
-        ctx.scale(scale, scale);
-        ctx.translate(-w / 2, -h / 2);
-      }
-    }
-    drawAyahFrame(ctx, canvas, ayah, surah, settings, platform, 1);
-    ctx.restore();
-  }
-  if (settings.showWatermark && settings.watermarkText?.trim()) {
-    drawWatermark(ctx, w, h, settings.watermarkText);
-  }
+  return prepared.length;
 }
 
 /* ── Audio URL helpers (unchanged) ───────────────────────────── */
@@ -559,15 +448,21 @@ export async function generateVideo(params: {
   surah: Surah;
   reciter: Reciter;
   settings: VideoSettings;
-  platform: (typeof PLATFORMS)[0];
-  onLog: (log: GenLog) => void;
+  platform: Platform;
+  onLog: (log: { msg: string; pct: number }) => void;
   signal: AbortSignal;
 }): Promise<Blob> {
   const { ayahs, surah, reciter, settings, platform, onLog, signal } = params;
-  const log = (msg: string, pct: number) => onLog({ msg, pct });
+  // Overlay rendering and the worker report progress concurrently; keep the
+  // bar monotone so interleaved messages never make it jump backwards.
+  let lastPct = 0;
+  const log = (msg: string, pct: number) => {
+    if (pct >= 0) lastPct = Math.max(lastPct, pct);
+    onLog({ msg, pct: pct >= 0 ? lastPct : pct });
+  };
 
   const profile = getDeviceProfile();
-  const [cw, ch] = getOutputResolution(platform);
+  const [cw, ch] = getOutputResolution(platform.aspect, profile.isLowPower);
 
   const needsBgVideo =
     settings.background === "upload" ||
@@ -580,14 +475,18 @@ export async function generateVideo(params: {
   try {
     /* ── 1a. Kick off background playlist fetch immediately — runs
        concurrently with audio download/decode below. ──────────── */
-    const bgBytesPromise: Promise<ArrayBuffer[]> = needsBgVideo
+    const bgBytesPromise: Promise<{
+      bytes: ArrayBuffer[];
+      durations: number[];
+    }> = needsBgVideo
       ? getBackgroundBytesList(settings, signal)
-      : Promise.resolve([]);
+      : Promise.resolve({ bytes: [], durations: [] });
 
     /* ── 1b. Fetch + decode + resample audio (concurrent) ───── */
     log("Downloading & decoding audio…", 5);
     const verseSpacing = settings.verseSpacing ?? 0;
 
+    acquireAudioContext();
     const prepared: PreparedAyah[] = await parallelMap(
       ayahs,
       async (ayah, i) => {
@@ -596,7 +495,7 @@ export async function generateVideo(params: {
         const cacheKey = reciter.quranApiNo
           ? audioCacheKey(reciter.quranApiNo, surah.number, ayah.numberInSurah)
           : "";
-        let samples = cacheKey ? (_audioCache.get(cacheKey) ?? null) : null;
+        let samples = cacheKey ? (audioCacheGet(cacheKey) ?? null) : null;
 
         if (!samples) {
           const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
@@ -616,9 +515,9 @@ export async function generateVideo(params: {
       },
       AUDIO_CONCURRENCY,
     );
+    releaseAudioContext();
 
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    releaseAudioContext();
 
     /* ── 2. Build one continuous audio track ────────────────── */
     log("Assembling audio track…", 26);
@@ -644,29 +543,11 @@ export async function generateVideo(params: {
       }
     }
 
-    /* ── 3. Render text overlays (main thread, cheap) ───────── */
-    log("Rendering text overlays…", 30);
-    await ensureFontsReady(); // Critical for mobile + new web fonts (Poppins/JetBrains)
-    const ayahFrameBitmaps = await renderAyahOverlays(
-      prepared,
-      surah,
-      settings,
-      platform,
-      cw,
-      ch,
-      (done, total) =>
-        log(
-          `Rendering overlay ${done}/${total}`,
-          30 + Math.round((done / total) * 8),
-        ),
-    );
-
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-
-    /* ── 4. Wait for background bytes (already downloading since
+    /* ── 3. Wait for background bytes (already downloading since
        step 1a — usually already resolved). ─────────────────────── */
-    log("Preparing background…", 40);
-    const bgVideoBytesList = await bgBytesPromise;
+    log("Preparing background…", 30);
+    const { bytes: bgVideoBytesList, durations: bgDurations } =
+      await bgBytesPromise;
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     const requestedBg =
       settings.background === "upload"
@@ -674,21 +555,28 @@ export async function generateVideo(params: {
       : (settings.videoUrls?.length ?? (settings.videoUrl ? 1 : 0));
     if (needsBgVideo && requestedBg > 0 && bgVideoBytesList.length === 0) {
       throw new Error(
-        "Could not load the selected background video. Please re-select it in Settings or pick a color background, then try again.",
+        "Could not load the selected background video. Please re-select it in Settings, then try again.",
       );
     }
 
-    /* ── 5. Hand everything off to the Worker. ─────────────────── */
-    log("Starting encoder (background thread)…", 42);
+    /* ── 4. Start the worker. Audio encoding + background decode begin
+       immediately, overlapping with overlay rendering below. ───────── */
+    log("Starting encoder (background thread)…", 33);
+
+    const segments: WorkerSegment[] = buildSegments(prepared);
+    const totalRenderFrames =
+      segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
 
     /* Per-clip frame budget, sampled evenly across each clip's real length.
        Desktop: 2400 frames = 80s at full 30fps (covers virtually any pick).
        Mobile drops to 1200 (≈40s @30fps) and 720p output so RAM stays sane. */
     const maxBgFrames = profile.isLowPower ? 1200 : MAX_BG_FRAMES;
+    /* The playlist as a whole may never hold more frames than the output can
+       actually display — this is what stops a long playlist from multiplying
+       resident bitmap memory. Small margin covers the seam crossfades. */
+    const maxTotalBgFrames = totalRenderFrames + 64;
 
-    const segments: WorkerSegment[] = buildSegments(prepared);
-
-    const blob = await runWorkerEncode({
+    const enc = startWorkerEncode({
       cw,
       ch,
       renderFps: FPS,
@@ -699,9 +587,11 @@ export async function generateVideo(params: {
       channels: CHANNELS,
       frameDurationS: 1 / FPS,
       segments,
-      ayahFrameBitmaps,
+      overlayCount: prepared.length,
       bgVideoBytes: bgVideoBytesList,
       maxBgFrames,
+      maxTotalBgFrames,
+      bgDurations,
       fullAudioTrack: fullTrack,
       transitionStyle: settings.transitionStyle,
       latencyMode: profile.latencyMode,
@@ -710,6 +600,35 @@ export async function generateVideo(params: {
       signal: signal,
     });
 
+    /* ── 5. Render text overlays and stream them to the worker in
+       batches (it never holds more than a handful at once). ───────── */
+    log("Rendering text overlays…", 36);
+    try {
+      await ensureFontsReady(settings); // Critical for mobile + new web fonts
+      await renderAyahOverlays(
+        prepared,
+        surah,
+        settings,
+        cw,
+        ch,
+        (startIndex, bitmaps) => enc.postOverlays(startIndex, bitmaps),
+        (done, total) =>
+          log(
+            `Rendering overlay ${done}/${total}`,
+            36 + Math.round((done / total) * 10),
+          ),
+      );
+    } catch (err) {
+      enc.fail(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    }
+
+    if (signal.aborted) {
+      enc.fail(new DOMException("Aborted", "AbortError"));
+      throw new DOMException("Aborted", "AbortError");
+    }
+
+    const blob = await enc.promise;
     return blob;
   } finally {
     releaseAudioContext();
@@ -722,7 +641,7 @@ export async function generateVideo(params: {
    Worker bootstrap
 ══════════════════════════════════════════════════════════════ */
 
-function runWorkerEncode(opts: {
+function startWorkerEncode(opts: {
   cw: number;
   ch: number;
   renderFps: number;
@@ -733,93 +652,136 @@ function runWorkerEncode(opts: {
   channels: number;
   frameDurationS: number;
   segments: WorkerSegment[];
-  ayahFrameBitmaps: ImageBitmap[];
+  overlayCount: number;
   bgVideoBytes: ArrayBuffer[];
   maxBgFrames: number;
+  maxTotalBgFrames: number;
+  bgDurations: number[];
   fullAudioTrack: Float32Array;
   transitionStyle: "none" | "fade" | "slide" | "scale";
   latencyMode: "quality" | "realtime";
   bgOverlayPct: number;
   onLog: (msg: string, pct: number) => void;
   signal: AbortSignal;
-}): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./encode.worker.ts", import.meta.url), {
-      type: "module",
-    });
-
-    const cleanup = () => {
-      worker.terminate();
-      opts.signal.removeEventListener("abort", onAbort);
-    };
-
-    const onAbort = () => {
-      const m: WorkerInMessage = { type: "abort" };
-      worker.postMessage(m);
-      cleanup();
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    opts.signal.addEventListener("abort", onAbort);
-
-    worker.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
-      const msg = e.data;
-      if (msg.type === "progress") {
-        opts.onLog(msg.msg, msg.pct);
-      } else if (msg.type === "done") {
-        cleanup();
-        resolve(new Blob([msg.buffer], { type: "video/mp4" }));
-      } else if (msg.type === "error") {
-        cleanup();
-        reject(new Error(msg.message));
-      }
-    };
-
-    worker.onerror = (e) => {
-      cleanup();
-      // An ErrorEvent (script threw) carries file/line; a bare Event or a
-      // module-load failure often has neither, but some browsers expose
-      // `.error` — serialize everything we can find so we never guess.
-      const ev = e as any;
-      const parts: string[] = [];
-      if (ev.message) parts.push(String(ev.message));
-      if (ev.filename) parts.push(`${ev.filename.split("/").pop()}:${ev.lineno}:${ev.colno}`);
-      if (ev.error) parts.push(ev.error?.stack || String(ev.error));
-      const detail =
-        parts.join(" · ") ||
-        `script load failed (${e.type ?? "error"}) — likely a stale chunk; wipe .next and restart`;
-      reject(new Error(`Worker error: ${detail}`));
-      // Also log the raw event for deep inspection in DevTools.
-      console.error("[worker.onerror] raw event:", e);
-    };
-
-    const startMsg: WorkerInMessage = {
-      type: "start",
-      payload: {
-        cw: opts.cw,
-        ch: opts.ch,
-        renderFps: opts.renderFps,
-        outputFps: opts.outputFps,
-        videoBitrate: opts.videoBitrate,
-        audioBitrate: opts.audioBitrate,
-        sampleRate: opts.sampleRate,
-        channels: opts.channels,
-        segments: opts.segments,
-        ayahFrameBitmaps: opts.ayahFrameBitmaps,
-        bgVideoBytes: opts.bgVideoBytes,
-        maxBgFrames: opts.maxBgFrames,
-        fullAudioTrack: opts.fullAudioTrack.buffer as ArrayBuffer,
-        transitionStyle: opts.transitionStyle,
-        latencyMode: opts.latencyMode,
-        bgOverlayPct: opts.bgOverlayPct,
-      },
-    };
-
-    const transferList: Transferable[] = [
-      opts.fullAudioTrack.buffer as ArrayBuffer,
-      ...opts.ayahFrameBitmaps,
-      ...opts.bgVideoBytes,
-    ];
-
-    worker.postMessage(startMsg, transferList);
+}): {
+  promise: Promise<Blob>;
+  postOverlays: (startIndex: number, bitmaps: ImageBitmap[]) => void;
+  fail: (err: Error) => void;
+} {
+  const worker = new Worker(new URL("./encode.worker.ts", import.meta.url), {
+    type: "module",
   });
+
+  let settled = false;
+  let resolveFn: (blob: Blob) => void = () => {};
+  let rejectFn: (err: Error) => void = () => {};
+
+  const cleanup = () => {
+    worker.terminate();
+    opts.signal.removeEventListener("abort", onAbort);
+  };
+
+  const onAbort = () => {
+    // The worker is terminated immediately below — posting an "abort"
+    // message first could never be processed in time, so just clean up.
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectFn(new DOMException("Aborted", "AbortError"));
+  };
+  opts.signal.addEventListener("abort", onAbort);
+
+  worker.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
+    const msg = e.data;
+    if (msg.type === "progress") {
+      opts.onLog(msg.msg, msg.pct);
+    } else if (msg.type === "done") {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolveFn(new Blob([msg.buffer], { type: "video/mp4" }));
+    } else if (msg.type === "error") {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectFn(new Error(msg.message));
+    }
+  };
+
+  worker.onerror = (e) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    // An ErrorEvent (script threw) carries file/line; a bare Event or a
+    // module-load failure often has neither, but some browsers expose
+    // `.error` — serialize everything we can find so we never guess.
+    const ev = e as any;
+    const parts: string[] = [];
+    if (ev.message) parts.push(String(ev.message));
+    if (ev.filename) parts.push(`${ev.filename.split("/").pop()}:${ev.lineno}:${ev.colno}`);
+    if (ev.error) parts.push(ev.error?.stack || String(ev.error));
+    const detail =
+      parts.join(" · ") ||
+      `script load failed (${e.type ?? "error"}) — likely a stale chunk; wipe .next and restart`;
+    rejectFn(new Error(`Worker error: ${detail}`));
+    // Also log the raw event for deep inspection in DevTools.
+    console.error("[worker.onerror] raw event:", e);
+  };
+
+  const startMsg: WorkerInMessage = {
+    type: "start",
+    payload: {
+      cw: opts.cw,
+      ch: opts.ch,
+      renderFps: opts.renderFps,
+      outputFps: opts.outputFps,
+      videoBitrate: opts.videoBitrate,
+      audioBitrate: opts.audioBitrate,
+      sampleRate: opts.sampleRate,
+      channels: opts.channels,
+      segments: opts.segments,
+      overlayCount: opts.overlayCount,
+      bgVideoBytes: opts.bgVideoBytes,
+      maxBgFrames: opts.maxBgFrames,
+      maxTotalBgFrames: opts.maxTotalBgFrames,
+      bgDurations: opts.bgDurations,
+      fullAudioTrack: opts.fullAudioTrack.buffer as ArrayBuffer,
+      transitionStyle: opts.transitionStyle,
+      latencyMode: opts.latencyMode,
+      bgOverlayPct: opts.bgOverlayPct,
+    },
+  };
+
+  const transferList: Transferable[] = [
+    opts.fullAudioTrack.buffer as ArrayBuffer,
+    ...opts.bgVideoBytes,
+  ];
+
+  worker.postMessage(startMsg, transferList);
+
+  const promise = new Promise<Blob>((resolve, reject) => {
+    resolveFn = resolve;
+    rejectFn = reject;
+  });
+
+  return {
+    promise,
+    postOverlays: (startIndex, bitmaps) => {
+      if (settled) {
+        // Worker already gone — release bitmaps that will never be sent.
+        bitmaps.forEach((b) => b.close());
+        return;
+      }
+      worker.postMessage(
+        { type: "overlays", startIndex, bitmaps },
+        bitmaps as unknown as Transferable[],
+      );
+    },
+    fail: (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectFn(err);
+    },
+  };
 }

@@ -1,19 +1,34 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Inter, Amiri, Noto_Naskh_Arabic } from "next/font/google";
+import {
+  Marcellus,
+  Alegreya_Sans,
+  Aref_Ruqaa,
+  Amiri,
+  Noto_Naskh_Arabic,
+} from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { MotionProvider } from "@/components/MotionProvider";
 import "./globals.css";
 
-const fraunces = Fraunces({
+const marcellus = Marcellus({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: "400",
   variable: "--font-display",
   display: "swap",
 });
 
-const inter = Inter({
+const alegreya = Alegreya_Sans({
   subsets: ["latin"],
+  weight: ["400", "500", "700"],
   variable: "--font-sans",
+  display: "swap",
+});
+
+const ruqaa = Aref_Ruqaa({
+  subsets: ["arabic"],
+  weight: ["400", "700"],
+  variable: "--font-ruqaa",
   display: "swap",
 });
 
@@ -101,15 +116,10 @@ export const metadata: Metadata = {
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
-    apple: "/icon.svg",
+    apple: "/apple-touch-icon.png",
   },
   alternates: {
     canonical: BASE_URL,
-    languages: {
-      en: BASE_URL,
-      ar: `${BASE_URL}?lang=ar`,
-      fr: `${BASE_URL}?lang=fr`,
-    },
   },
   verification: {
     // Add your Google Search Console token here when ready:
@@ -118,7 +128,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0c0a09",
+  themeColor: "#121728",
   width: "device-width",
   initialScale: 1,
 };
@@ -151,7 +161,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${inter.variable} ${amiri.variable} ${naskh.variable}`}
+      className={`${marcellus.variable} ${alegreya.variable} ${ruqaa.variable} ${amiri.variable} ${naskh.variable}`}
     >
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -164,7 +174,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <Analytics />
         <SpeedInsights />
-        {children}
+        <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
   );

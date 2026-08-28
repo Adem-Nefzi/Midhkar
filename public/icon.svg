@@ -1,5 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">
-  <rect width="36" height="36" rx="4" fill="#0c0a09"/>
-  <path d="M18,2 L21,15 L34,12 L24,18 L34,24 L21,21 L18,34 L15,21 L2,24 L12,18 L2,12 L15,15 Z" fill="none" stroke="#d4af37" stroke-width="1.2"/>
-  <circle cx="18" cy="18" r="2" fill="#d4af37" opacity="0.6"/>
+  <rect width="36" height="36" rx="7" fill="#121728"/>
+  <g transform="translate(18 18)">
+    <g>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(45)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(90)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(135)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(180)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(225)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(270)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+      <ellipse cx="0" cy="-8" rx="3.1" ry="7" transform="rotate(315)" fill="#c9a227" fill-opacity="0.32" stroke="#c9a227" stroke-opacity="0.6" stroke-width="0.9"/>
+    </g>
+    <circle r="3.4" fill="#e3c766"/>
+  </g>
 </svg>

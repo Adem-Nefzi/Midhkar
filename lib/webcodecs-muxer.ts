@@ -20,17 +20,28 @@ export function isWebCodecsSupported(): boolean {
 }
 
 let _audioCtx: AudioContext | null = null;
+/* Refcount so concurrent users (duration estimator, prefetch, generation)
+   never close the context out from under each other mid-decode. */
+let _audioCtxRefs = 0;
 
-export function getAudioContext(): AudioContext {
+function getAudioContext(): AudioContext {
   if (!_audioCtx || _audioCtx.state === "closed") {
     _audioCtx = new AudioContext();
   }
   return _audioCtx;
 }
 
+export function acquireAudioContext(): void {
+  _audioCtxRefs++;
+  getAudioContext();
+}
+
 export function releaseAudioContext(): void {
-  _audioCtx?.close().catch(() => {});
-  _audioCtx = null;
+  _audioCtxRefs = Math.max(0, _audioCtxRefs - 1);
+  if (_audioCtxRefs === 0) {
+    _audioCtx?.close().catch(() => {});
+    _audioCtx = null;
+  }
 }
 
 /**

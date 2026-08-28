@@ -1,225 +1,152 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
-import { useEffect, useRef, useState } from "react";
-import { Reveal, usePointerVars } from "@/components/Reveal";
+import { m } from "motion/react";
+import { EASE_OUT } from "@/components/MotionProvider";
+import { usePointerVars } from "@/components/Reveal";
+import { MicIcon, VideoCameraIcon } from "@/components/VideoBuilder/icons";
+import { Bloom, GardenMark } from "@/components/Ornament/ornaments";
+import { CalligraphyWatermark, ThreadDivider, Parallax } from "@/components/Home/atmosphere";
+
+function FeatureRow({
+  icon,
+  title,
+  description,
+  index,
+  first,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  index: number;
+  first: boolean;
+}) {
+  const ref = usePointerVars<HTMLDivElement>();
+
+  return (
+    <m.div
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.4 }}
+      transition={{ duration: 0.7, ease: EASE_OUT, delay: index * 0.12 }}
+    >
+      <div
+        ref={ref}
+        className={`track-glow group relative flex gap-5 overflow-hidden rounded-2xl px-4 py-7 transition-colors duration-300 hover:bg-ink-soft/40 ${first ? "" : "border-t border-gold/10"}`}
+      >
+        <span className="relative mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gold/25 bg-gold/[0.08] text-gold transition-all duration-300 group-hover:border-gold/50 group-hover:bg-gold/[0.14] group-hover:shadow-[0_8px_24px_-12px_rgb(var(--gold)/0.5)]">
+          <Bloom className="absolute inset-0 m-auto h-9 w-9 opacity-0 transition-opacity duration-300 group-hover:opacity-100" petals={8} />
+          <span className="transition-opacity duration-300 group-hover:opacity-0">{icon}</span>
+        </span>
+        <div>
+          <h3 className="font-display text-lg text-parchment">{title}</h3>
+          <p className="mt-1.5 max-w-lg text-sm leading-relaxed text-parchment-muted">
+            {description}
+          </p>
+        </div>
+      </div>
+    </m.div>
+  );
+}
 
 export function Features() {
   const { t, locale } = useI18n();
-  const [visible, setVisible] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.2 },
-    );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
-
-  const items = t("features.items") as unknown as { title: string; description: string }[];
+  const items = t("features.items") as unknown as {
+    title: string;
+    description: string;
+  }[];
+  const facts = t("features.facts") as unknown as string[];
 
   const icons = [
-    <svg
-      key="1"
-      className="h-6 w-6"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-      />
-    </svg>,
-    <svg
-      key="2"
-      className="h-6 w-6"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M13 10V3L4 14h7v7l9-11h-7z"
-      />
-    </svg>,
-    <svg
-      key="3"
-      className="h-6 w-6"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-      />
-    </svg>,
+    <MicIcon key="1" className="h-5 w-5" />,
+    <VideoCameraIcon key="2" className="h-5 w-5" />,
+    <GardenMark key="3" className="h-6 w-6" />,
   ];
 
   return (
     <section
       id="features"
-      ref={ref}
-      className="relative overflow-hidden border-t border-gold/10 bg-ink py-24 sm:py-32"
+      className="relative overflow-hidden py-24 sm:py-32"
     >
-      {/* Ambient glows */}
-      <div className="absolute left-1/2 top-0 h-[400px] w-[600px] -translate-x-1/2 bg-gold/[0.03] blur-[100px]" />
-      <div className="absolute right-0 top-1/3 h-[300px] w-[300px] bg-verdant/[0.02] blur-[80px]" />
-
-      {/* Islamic geometric pattern background — more visible */}
-      <div className="absolute inset-0 opacity-[0.06]">
-        <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern
-              id="arabesque-features"
-              x="0"
-              y="0"
-              width="60"
-              height="60"
-              patternUnits="userSpaceOnUse"
+      <ThreadDivider className="absolute inset-x-0 top-0" />
+      <Parallax px={90} scale={0.06} rotate={2} className="inset-0 -inset-y-20">
+        <CalligraphyWatermark className="right-0 top-[6%] translate-x-[22%] text-[10rem] text-gold sm:text-[13rem] lg:text-[17rem]">
+          الذِّكْر
+        </CalligraphyWatermark>
+        {/* One great rose breathing beneath the watermark */}
+        <Bloom
+          className="bloom-sway absolute right-[8%] top-[58%] h-40 w-40 opacity-[0.13] sm:h-56 sm:w-56"
+          petals={12}
+          hue="rose"
+        />
+      </Parallax>
+      <div className="relative mx-auto grid max-w-6xl gap-14 px-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-20">
+        <div>
+          <m.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.4 }}
+            transition={{ duration: 0.8, ease: EASE_OUT }}
+          >
+            <h2
+              className="font-display text-3xl font-medium leading-tight tracking-[0.01em] text-parchment sm:text-4xl"
+              style={
+                locale === "ar"
+                  ? { fontFamily: "var(--font-ruqaa), 'Aref Ruqaa', serif" }
+                  : undefined
+              }
             >
-              <path
-                d="M30,0 L33,27 L60,30 L33,33 L30,60 L27,33 L0,30 L27,27 Z"
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="0.5"
-              />
-              <circle
-                cx="30"
-                cy="30"
-                r="4"
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="0.4"
-              />
-              <path
-                d="M30,20 L32,28 L40,30 L32,32 L30,40 L28,32 L20,30 L28,28 Z"
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="0.25"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#arabesque-features)" />
-        </svg>
-      </div>
+              {t("features.title") as string}
+            </h2>
+            <p className="mt-5 max-w-md leading-relaxed text-parchment-muted">
+              {t("features.description") as string}
+            </p>
+          </m.div>
 
-      {/* Top decorative line — brighter */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 h-[2px] w-3/4 bg-gradient-to-r from-transparent via-gold/30 to-transparent" />
-
-      {/* Floating orbs */}
-      <div className="absolute top-[15%] left-[8%] h-[150px] w-[150px] animate-float-1 rounded-full bg-gold/[0.04] blur-[60px]" />
-      <div className="absolute bottom-[20%] right-[10%] h-[180px] w-[180px] animate-float-2 rounded-full bg-gold/[0.03] blur-[70px]" />
-
-      <div className="relative z-10 mx-auto max-w-6xl px-6">
-        {/* Section header with Islamic ornament — modern reveal */}
-        <Reveal className="text-center mb-16">
-          {/* Ornamental divider above title — brighter */}
-          <div className="flex items-center justify-center gap-5 mb-8">
-            <div className="h-px w-20 bg-gradient-to-r from-transparent to-gold/40" />
-            <svg
-              className="h-6 w-6 text-gold/50"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-            >
-              <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" />
-            </svg>
-            <div className="h-px w-20 bg-gradient-to-l from-transparent to-gold/40" />
-          </div>
-
-          <p className="text-xs uppercase tracking-[0.25em] text-gold/70 mb-4">
-            {t("features.eyebrow") as string}
-          </p>
-          <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl md:text-5xl leading-tight">
-            {locale === "ar" ? (
-              <span
-                style={{ fontFamily: "'Amiri', 'Scheherazade New', serif" }}
+          <m.ul
+            className="mt-9 flex flex-wrap gap-2.5"
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, amount: 0.4 }}
+            variants={{
+              hidden: {},
+              show: { transition: { staggerChildren: 0.09, delayChildren: 0.15 } },
+            }}
+          >
+            {facts.map((fact) => (
+              <m.li
+                key={fact}
+                className="flex items-center gap-2 rounded-full border border-gold/20 bg-gold/[0.06] px-3.5 py-1.5 text-[13px] font-medium text-gold/90"
+                variants={{
+                  hidden: { opacity: 0, y: 10, scale: 0.92 },
+                  show: {
+                    opacity: 1,
+                    y: 0,
+                    scale: 1,
+                    transition: { duration: 0.5, ease: EASE_OUT },
+                  },
+                }}
               >
-                {t("features.title") as string}
-              </span>
-            ) : (
-              (t("features.title") as string)
-            )}
-          </h2>
-          <p className="mt-4 max-w-xl mx-auto text-parchment-muted leading-relaxed">
-            {t("features.description") as string}
-          </p>
+                <Bloom className="h-3 w-3" petals={6} open={false} />
+                {fact}
+              </m.li>
+            ))}
+          </m.ul>
+        </div>
 
-          {/* Bottom ornamental divider */}
-          <div className="flex items-center justify-center gap-4 mt-8">
-            <div className="h-px w-12 bg-gradient-to-r from-transparent to-gold/25" />
-            <div className="h-1.5 w-1.5 rounded-full bg-gold/30" />
-            <div className="h-px w-12 bg-gradient-to-l from-transparent to-gold/25" />
-          </div>
-        </Reveal>
-
-        {/* Feature cards — modern glass bento */}
-        <div className="grid gap-5 sm:grid-cols-1 md:grid-cols-3">
+        <div>
           {items.map((item, i) => (
-            <FeatureCard key={i} item={item} index={i} icon={icons[i]} />
+            <FeatureRow
+              key={i}
+              icon={icons[i]}
+              title={item.title}
+              description={item.description}
+              index={i}
+              first={i === 0}
+            />
           ))}
         </div>
       </div>
     </section>
-  );
-}
-
-function FeatureCard({
-  item,
-  index,
-  icon,
-}: {
-  item: { title: string; description: string };
-  index: number;
-  icon: React.ReactNode;
-}) {
-  const ref = usePointerVars<HTMLDivElement>();
-  return (
-    <Reveal delay={index * 110} y={26}>
-      <div
-        ref={ref}
-        className="group btn-luxe glass relative h-full overflow-hidden rounded-2xl p-7 transition-all duration-500 hover:-translate-y-1.5 hover:border-gold/35 hover:shadow-[0_20px_50px_-20px_rgba(212,175,55,0.22)]"
-      >
-        {/* Gradient wash that follows the pointer */}
-        <div
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-          style={{
-            background:
-              "radial-gradient(300px circle at var(--mx,50%) var(--my,50%), rgba(212,175,55,0.10), transparent 55%)",
-          }}
-        />
-
-        {/* Icon chip */}
-        <div className="relative mb-5 inline-flex rounded-xl border border-gold/25 bg-gold/10 p-3.5 text-gold shadow-inner shadow-gold/5 transition-all duration-500 group-hover:scale-105 group-hover:border-gold/50 group-hover:bg-gold/20 group-hover:shadow-gold/20">
-          {icon}
-        </div>
-
-        <h3 className="font-display text-lg font-semibold text-parchment">
-          {item.title}
-        </h3>
-        <p className="mt-2.5 text-sm leading-relaxed text-parchment-muted/85">
-          {item.description}
-        </p>
-
-        {/* Bottom accent line that grows on hover */}
-        <div className="mt-6 h-px w-10 bg-gradient-to-r from-gold/40 to-transparent transition-all duration-500 group-hover:w-24 group-hover:from-gold/70" />
-      </div>
-    </Reveal>
   );
 }

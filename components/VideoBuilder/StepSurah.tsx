@@ -1,24 +1,13 @@
 "use client";
-/**
- * StepSurah.tsx  —  Step 1: choose a surah
- *
- * Redesigned with:
- *  - Revelation-type filter tabs (All / Meccan / Medinan)
- *  - Quick-select popular surahs row
- *  - Selected surah summary card
- *  - Polished card grid with better hierarchy
- *  - Keyboard-friendly search
- */
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
-  IslamicDivider,
   GeometricRosette,
-  KuficBorder,
-  IslamicStarIcon,
   SearchIcon,
-  CrescentMoonIcon,
   CheckIcon,
+  ArrowIcon,
+  AyahMarker,
+  IslamicDivider,
 } from "./icons";
 import type { Surah } from "@/lib/quran";
 
@@ -31,13 +20,20 @@ interface Props {
   locale: string;
 }
 
-const POPULAR_NUMBERS = [1, 2, 18, 36, 55, 67];
+const POPULAR_NUMBERS = [1, 2, 18, 36, 55, 67, 78, 112];
 
-const FILTER_TABS = [
-  { id: "all", labelEn: "All", labelAr: "الكل" },
-  { id: "Meccan", labelEn: "Meccan", labelAr: "مكية" },
-  { id: "Medinan", labelEn: "Medinan", labelAr: "مدنية" },
-] as const;
+type FilterId = "all" | "Meccan" | "Medinan" | "short" | "long";
+
+const FILTER_TABS: { id: FilterId; en: string; fr: string; ar: string }[] = [
+  { id: "all", en: "All", fr: "Toutes", ar: "الكل" },
+  { id: "Meccan", en: "Meccan", fr: "Mecquoise", ar: "مكية" },
+  { id: "Medinan", en: "Medinan", fr: "Médinoise", ar: "مدنية" },
+  { id: "short", en: "Short", fr: "Courtes", ar: "قصيرة" },
+  { id: "long", en: "Long", fr: "Longues", ar: "طويلة" },
+];
+
+const SHORT_MAX = 30;
+const LONG_MIN = 100;
 
 export function StepSurah({
   surahs,
@@ -47,31 +43,14 @@ export function StepSurah({
   onNext,
   locale,
 }: Props) {
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<string>("all");
-  const [hoveredSurah, setHoveredSurah] = useState<Surah | null>(null);
-  const [hoverPos, setHoverPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const searchRef = useRef<HTMLInputElement>(null);
-  const hoverCardRef = useRef<HTMLDivElement>(null);
+  const ar = locale === "ar";
+  const fr = locale === "fr";
+  const L = (o: { en: string; fr: string; ar: string }) =>
+    ar ? o.ar : fr ? o.fr : o.en;
 
-  const handleSurahHover = useCallback((surah: Surah | null, e?: React.MouseEvent) => {
-    setHoveredSurah(surah);
-    if (surah && e) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const cardWidth = 380;
-      const cardHeight = 70;
-      let top = rect.bottom + 8;
-      let left = rect.left + rect.width / 2 - cardWidth / 2;
-      if (top + cardHeight > window.innerHeight - 16) {
-        top = rect.top - cardHeight - 8;
-      }
-      if (top < 16) {
-        top = 16;
-      }
-      left = Math.max(16, Math.min(left, window.innerWidth - cardWidth - 16));
-      setHoverPos({ top, left });
-    }
-  }, []);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<FilterId>("all");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -86,15 +65,19 @@ export function StepSurah({
 
   const filtered = useMemo(() => {
     let list = surahs;
-    if (filter !== "all") {
+    if (filter === "Meccan" || filter === "Medinan") {
       list = list.filter((s) => s.revelationType === filter);
+    } else if (filter === "short") {
+      list = list.filter((s) => s.numberOfAyahs <= SHORT_MAX);
+    } else if (filter === "long") {
+      list = list.filter((s) => s.numberOfAyahs >= LONG_MIN);
     }
     if (query.trim()) {
-      const q = query.toLowerCase();
+      const q = query.toLowerCase().trim();
       list = list.filter(
         (s) =>
           s.englishName.toLowerCase().includes(q) ||
-          s.name.includes(query) ||
+          s.name.includes(query.trim()) ||
           String(s.number) === q ||
           s.englishNameTranslation.toLowerCase().includes(q),
       );
@@ -102,19 +85,16 @@ export function StepSurah({
     return list;
   }, [surahs, query, filter]);
 
-  // Virtualized slicing: render at most 60 surah cards in the DOM at a time
-  const [visibleCount, setVisibleCount] = useState(60);
+  const [visibleCount, setVisibleCount] = useState(48);
   const visible = useMemo(
     () => filtered.slice(0, visibleCount),
     [filtered, visibleCount],
   );
 
-  // Reset pagination when filter or query changes
   useEffect(() => {
-    setVisibleCount(60);
+    setVisibleCount(48);
   }, [filter, query]);
 
-  // Infinite scroll: load more when user scrolls near the bottom
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinelRef.current;
@@ -122,113 +102,133 @@ export function StepSurah({
     const obs = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && visibleCount < filtered.length) {
-          setVisibleCount((c) => Math.min(c + 60, filtered.length));
+          setVisibleCount((c) => Math.min(c + 48, filtered.length));
         }
       },
-      { rootMargin: "200px" },
+      { rootMargin: "300px" },
     );
     obs.observe(el);
     return () => obs.disconnect();
   }, [visibleCount, filtered.length]);
 
   const popular = useMemo(
-    () => surahs.filter((s) => POPULAR_NUMBERS.includes(s.number)),
+    () =>
+      POPULAR_NUMBERS.map((n) => surahs.find((s) => s.number === n)).filter(
+        (s): s is Surah => Boolean(s),
+      ),
     [surahs],
   );
 
+  const revelationLabel = (s: Surah) =>
+    s.revelationType === "Meccan"
+      ? L({ en: "Meccan", fr: "Mecquoise", ar: "مكية" })
+      : L({ en: "Medinan", fr: "Médinoise", ar: "مدنية" });
+
   return (
-    <div className="animate-fade-up">
-      {/* Header */}
-      <div className="text-center mb-8">
-        <IslamicDivider className="mb-4" />
-        <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
-          {locale === "ar"
-            ? "اختر السورة"
-            : locale === "fr"
-              ? "Choisir une sourate"
-              : "Choose a Surah"}
-        </h2>
-        <p className="mt-2 text-parchment-muted text-sm">
-          {locale === "ar"
-            ? "اختر من القرآن الكريم"
-            : "Select from the Holy Qur'an"}
+    <div className={`animate-step-in ${selected ? "pb-28" : ""}`}>
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div className="mb-8 text-center">
+        <p
+          className="mb-2 text-2xl text-gold/80"
+          style={{ fontFamily: "'Amiri', serif" }}
+          lang="ar"
+          dir="rtl"
+          translate="no"
+        >
+          بِسْمِ اللّٰهَ الرَّحْمٰنِ الرَّحِيْمِ
         </p>
+        <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
+          {L({ en: "Choose a Surah", fr: "Choisir une sourate", ar: "اختر السورة" })}
+        </h2>
+        <p className="mt-2 text-sm text-parchment-muted">
+          {L({
+            en: "Select from the Holy Qur'an — 114 chapters",
+            fr: "Choisissez parmi les 114 sourates du Saint Coran",
+            ar: "اختر من القرآن الكريم — ١١٤ سورة",
+          })}
+        </p>
+        <IslamicDivider className="mx-auto mt-4 w-40 text-gold/40" />
       </div>
 
-      {/* Selected surah summary */}
-      {selected && (
-        <div className="max-w-lg mx-auto mb-8 animate-fade-up">
-          <div className="relative rounded-sm border-2 border-gold/30 bg-gold/[0.06] p-5 kufic-frame">
-            <KuficBorder />
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gold/15 ring-2 ring-gold/30">
-                <span className="text-lg font-semibold text-gold font-display">
-                  {selected.number}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3
-                  className="text-xl font-medium text-parchment truncate"
-                  style={{ fontFamily: "'Amiri', serif" }}
-                >
-                  {selected.name}
-                </h3>
-                <p className="text-sm text-parchment-muted truncate">
-                  {selected.englishName} — {selected.englishNameTranslation}
-                </p>
-                <div className="mt-1 flex items-center gap-3 text-xs text-parchment-muted/60">
-                  <span className="flex items-center gap-1">
-                    <CrescentMoonIcon className="h-3 w-3 text-gold/30" />
-                    {selected.revelationType === "Meccan"
-                      ? locale === "ar" ? "مكية" : "Meccan"
-                      : locale === "ar" ? "مدنية" : "Medinan"}
-                  </span>
-                  <span>·</span>
-                  <span>
-                    {selected.numberOfAyahs}{" "}
-                    {locale === "ar" ? "آية" : "verses"}
-                  </span>
-                </div>
-              </div>
-              <CheckIcon className="h-6 w-6 text-gold shrink-0" />
-            </div>
-          </div>
+      {/* ── Search + filters ───────────────────────────────────── */}
+      <div className="mx-auto mb-6 max-w-3xl space-y-3">
+        <div className="group relative">
+          <SearchIcon className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/40 transition-colors group-focus-within:text-gold/80" />
+          <input
+            ref={searchRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={L({
+              en: "Search by name, meaning, or number…",
+              fr: "Rechercher par nom, signification ou numéro…",
+              ar: "ابحث بالاسم أو المعنى أو الرقم…",
+            })}
+            className="w-full rounded-2xl border border-gold/20 bg-ink-light/60 px-4 py-3.5 pl-11 pr-16 text-sm text-parchment placeholder-parchment-dim outline-none transition-all focus:border-gold/55 focus:bg-ink-light/90 focus:ring-2 focus:ring-gold/15"
+          />
+          <kbd className="absolute right-4 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-gold/20 bg-ink/60 px-1.5 py-0.5 font-mono text-[13px] text-parchment-dim sm:inline-flex">
+            ⌘K
+          </kbd>
         </div>
-      )}
 
-      {/* Quick select — popular surahs */}
-      {!query && filter === "all" && (
-        <div className="max-w-4xl mx-auto mb-6">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-gold/40 font-medium mb-3 text-center">
-            {locale === "ar" ? "سورة شائعة" : "Popular Surahs"}
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {FILTER_TABS.map((tab) => {
+            const active = filter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setFilter(tab.id)}
+                aria-pressed={active}
+                className={`rounded-full border px-4 py-2 text-[13px] font-medium transition-all duration-200 active:scale-95 ${
+                  active
+                    ? "border-gold/50 bg-gold/15 text-gold shadow-sm shadow-gold/10"
+                    : "border-gold/15 bg-ink-light/40 text-parchment-muted hover:border-gold/30 hover:text-parchment"
+                }`}
+              >
+                {L(tab)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Popular rail ───────────────────────────────────────── */}
+      {!query && filter === "all" && popular.length > 0 && (
+        <div className="mx-auto mb-8 max-w-5xl">
+          <p className="mb-3 text-center text-[13px] font-medium uppercase tracking-[0.25em] text-gold/60">
+            {L({ en: "Often recited", fr: "Souvent récitées", ar: "كثيرا ما تُتلى" })}
           </p>
-          <div className="flex flex-wrap justify-center gap-2">
+          <div className="flex snap-x gap-2 overflow-x-auto pb-2 [mask-image:linear-gradient(to_right,transparent,black_5%,black_95%,transparent)] [scrollbar-width:thin]">
             {popular.map((s) => {
               const isActive = selected?.number === s.number;
               return (
                 <button
                   key={s.number}
                   onClick={() => onSelect(s)}
-                  className={`group relative rounded-full border px-4 py-2.5 text-xs transition-all duration-200 hover:-translate-y-0.5 ${
+                  className={`relative flex shrink-0 snap-start items-center gap-3 rounded-2xl border px-4 py-3 transition-all duration-200 active:scale-95 ${
                     isActive
-                      ? "border-gold/50 bg-gold/15 text-gold shadow-sm shadow-gold/10"
-                      : "border-gold/15 bg-ink-light/30 text-parchment-muted hover:border-gold/30 hover:text-parchment hover:bg-ink-light/50"
+                      ? "select-bloom border-gold/55 bg-gold/15 lit-soft"
+                      : "border-gold/15 bg-ink-light/40 hover:border-gold/35 hover:bg-ink-light/70"
                   }`}
                 >
-                  <span className="flex items-center gap-2">
+                  <AyahMarker value={s.number} className="h-8 w-8" active={isActive} />
+                  <span className="text-left">
                     <span
-                      className="font-medium"
+                      className="block text-base leading-tight text-parchment"
                       style={{ fontFamily: "'Amiri', serif" }}
+                      lang="ar"
+                      dir="rtl"
+                      translate="no"
                     >
                       {s.name}
                     </span>
-                    <span className="text-parchment-muted/40">
+                    <span className="block text-[13px] text-parchment-dim">
                       {s.englishName}
                     </span>
                   </span>
                   {isActive && (
-                    <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-gold flex items-center justify-center">
-                      <CheckIcon className="h-2 w-2 text-ink" />
+                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold">
+                      <CheckIcon className="h-2.5 w-2.5 text-ink" />
                     </span>
                   )}
                 </button>
@@ -238,84 +238,29 @@ export function StepSurah({
         </div>
       )}
 
-      {/* Search + filters */}
-      <div className="max-w-2xl mx-auto mb-6 flex flex-col sm:flex-row gap-3">
-        {/* Search */}
-        <div className="relative flex-1 group">
-          <SearchIcon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/30 group-focus-within:text-gold/60 transition-colors" />
-          <input
-            ref={searchRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              locale === "ar"
-                ? "ابحث بالاسم أو الرقم..."
-                : "Search by name, English, or number..."
-            }
-            className="w-full rounded-sm border border-gold/20 bg-ink-light/40 px-4 py-3 pl-10 pr-4 sm:pr-16 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 focus:bg-ink-light/60 transition-all"
-          />
-          <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5 rounded border border-gold/15 bg-ink/50 px-1.5 py-0.5 text-[10px] text-parchment-muted/40 font-mono">
-            ⌘K
-          </kbd>
-        </div>
-
-        {/* Filter tabs */}
-        <div className="flex rounded-sm border border-gold/15 bg-ink-light/30 p-0.5">
-          {FILTER_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              className={`relative rounded-sm px-4 py-2 text-xs font-medium transition-all duration-200 ${
-                filter === tab.id
-                  ? "bg-gold/15 text-gold shadow-sm"
-                  : "text-parchment-muted/60 hover:text-parchment hover:bg-ink-light/40"
-              }`}
-            >
-              {locale === "ar" ? tab.labelAr : tab.labelEn}
-              {filter === tab.id && (
-                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-4 rounded-full bg-gold/50" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Result count */}
-      <div className="max-w-5xl mx-auto mb-3 flex items-center justify-between px-1">
-        <span className="text-[11px] text-parchment-muted/40">
-          {filtered.length}{" "}
-          {locale === "ar" ? "سورة" : "surahs"}
-          {filter !== "all" && (
-            <span className="ml-1">
-              ({locale === "ar"
-                ? filter === "Meccan" ? "مكية" : "مدنية"
-                : filter})
-            </span>
-          )}
+      {/* ── Result meta ────────────────────────────────────────── */}
+      <div className="mx-auto mb-3 flex max-w-5xl items-center justify-between px-1">
+        <span className="text-[13px] text-parchment-dim">
+          {filtered.length} {L({ en: "surahs", fr: "sourates", ar: "سورة" })}
         </span>
         {selected && (
-          <span className="text-[11px] text-gold/50 flex items-center gap-1">
+          <span className="flex items-center gap-1 text-[13px] text-gold/70">
             <CheckIcon className="h-3 w-3" />
             {selected.englishName}
           </span>
         )}
       </div>
 
-      {/* Grid */}
+      {/* ── The illuminated index ──────────────────────────────── */}
       {loading ? (
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
-          {Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} className="rounded-sm border border-gold/[0.08] bg-ink-light/20 p-4">
-              <div className="flex items-start gap-3">
+        <div className="mx-auto grid max-w-5xl gap-2 sm:gap-3 lg:grid-cols-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="panel rounded-2xl p-3 sm:p-4">
+              <div className="flex items-center gap-3">
                 <div className="skeleton h-10 w-10 rounded-full" />
                 <div className="flex-1 space-y-2">
-                  <div className="skeleton h-4 w-24" />
-                  <div className="skeleton h-3 w-32" />
-                  <div className="flex gap-2 mt-1.5">
-                    <div className="skeleton h-4 w-14 rounded-full" />
-                    <div className="skeleton h-4 w-10 rounded-full" />
-                  </div>
+                  <div className="skeleton h-5 w-28" />
+                  <div className="skeleton h-3 w-40" />
                 </div>
               </div>
             </div>
@@ -323,139 +268,128 @@ export function StepSurah({
         </div>
       ) : (
         <>
-          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl mx-auto">
+          <div className="mx-auto grid max-w-5xl gap-2 sm:gap-3 lg:grid-cols-2">
             {visible.map((surah) => {
               const isSelected = selected?.number === surah.number;
               return (
                 <button
                   key={surah.number}
                   onClick={() => onSelect(surah)}
-                  onMouseEnter={(e) => handleSurahHover(surah, e)}
-                  onMouseLeave={() => handleSurahHover(null)}
-                  className={`group relative rounded-sm border p-4 text-left transition-all duration-300 hover:-translate-y-1 glow-hover ${
+                  aria-pressed={isSelected}
+                  className={`group relative overflow-hidden rounded-2xl border p-3 text-left transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 sm:p-4 ${
                     isSelected
-                      ? "border-gold/50 bg-gold/[0.08] ring-1 ring-gold/25 shadow-lg shadow-gold/5"
-                      : "border-gold/[0.08] bg-ink-light/20 hover:border-gold/20 hover:bg-ink-light/40"
+                      ? "select-bloom border-gold/55 bg-gold/[0.08] lit-soft"
+                      : "border-gold/10 bg-ink-light/40 hover:-translate-y-0.5 hover:border-gold/30 hover:bg-ink-light/70"
                   }`}
                 >
-                  <KuficBorder />
-                  <div className="flex items-start gap-3">
-                    {/* Number badge */}
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-all duration-200 ${
-                        isSelected
-                          ? "bg-gold/20 text-gold ring-1 ring-gold/30"
-                          : "bg-gold/[0.06] text-gold/50 group-hover:bg-gold/10 group-hover:text-gold/70"
-                      }`}
-                    >
-                      {surah.number}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <AyahMarker
+                      value={surah.number}
+                      className="h-10 w-10 shrink-0 sm:h-11 sm:w-11"
+                      active={isSelected}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
                         <h3
-                          className="text-base font-medium text-parchment truncate"
+                          className="truncate text-lg font-medium leading-tight text-parchment"
                           style={{ fontFamily: "'Amiri', serif" }}
+                          lang="ar"
+                          dir="rtl"
+                          translate="no"
                         >
                           {surah.name}
                         </h3>
-                        {isSelected && (
-                          <CheckIcon className="h-4 w-4 text-gold shrink-0" />
+                        {isSelected ? (
+                          <CheckIcon className="h-4 w-4 shrink-0 text-gold" />
+                        ) : (
+                          <span className="hidden shrink-0 text-[13px] text-parchment-dim sm:block">
+                            {surah.numberOfAyahs}{" "}
+                            {L({ en: "ayahs", fr: "versets", ar: "آية" })}
+                          </span>
                         )}
                       </div>
-                      <p className="text-xs text-parchment-muted truncate mt-0.5">
+                      <p className="mt-0.5 truncate text-[13px] font-medium text-parchment-muted">
                         {surah.englishName}
+                        <span className="text-parchment-dim">
+                          {" "}
+                          · {surah.englishNameTranslation}
+                        </span>
                       </p>
-                      <div className="mt-1.5 flex items-center gap-2">
+                      <div className="mt-1.5 hidden items-center gap-2 sm:flex">
                         <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wider font-medium ${
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${
                             surah.revelationType === "Meccan"
-                              ? "bg-verdant/10 text-verdant/60"
-                              : "bg-azure/10 text-azure/60"
+                              ? "bg-verdant/15 text-verdant"
+                              : "bg-azure/15 text-azure-soft"
                           }`}
                         >
-                          {surah.revelationType === "Meccan"
-                            ? locale === "ar" ? "مكية" : "Meccan"
-                            : locale === "ar" ? "مدنية" : "Medinan"}
-                        </span>
-                        <span className="text-[10px] text-parchment-muted/30">
-                          {surah.numberOfAyahs}{" "}
-                          {locale === "ar" ? "آية" : "ayah"}
+                          {revelationLabel(surah)}
                         </span>
                       </div>
                     </div>
                   </div>
-
-                  {/* Hover glow effect */}
-                  <div
-                    className={`absolute inset-0 rounded-sm transition-opacity duration-300 pointer-events-none ${
-                      isSelected
-                        ? "opacity-100 bg-gradient-to-br from-gold/[0.04] to-transparent"
-                        : "opacity-0 group-hover:opacity-100 bg-gradient-to-br from-gold/[0.02] to-transparent"
-                    }`}
-                  />
                 </button>
               );
             })}
 
             {filtered.length === 0 && (
-              <div className="col-span-3 text-center py-16">
-                <GeometricRosette className="h-10 w-10 mx-auto mb-4 text-gold/15" />
-                <p className="text-parchment-muted text-sm">
-                  {locale === "ar" ? "لا توجد نتائج" : "No results found"}
+              <div className="col-span-full py-16 text-center">
+                <GeometricRosette className="mx-auto mb-4 h-10 w-10 text-gold/20" />
+                <p className="text-sm text-parchment-muted">
+                  {L({ en: "No results found", fr: "Aucun résultat", ar: "لا توجد نتائج" })}
                 </p>
-                <p className="text-parchment-muted/40 text-xs mt-1">
-                  {locale === "ar"
-                    ? "جرب البحث بكلمات مختلفة"
-                    : "Try a different search term"}
+                <p className="mt-1 text-[13px] text-parchment-dim">
+                  {L({
+                    en: "Try a different search term",
+                    fr: "Essayez un autre terme",
+                    ar: "جرب البحث بكلمات مختلفة",
+                  })}
                 </p>
               </div>
             )}
           </div>
 
-          {/* Infinite scroll sentinel */}
           {visibleCount < filtered.length && (
             <div ref={sentinelRef} className="flex justify-center py-6">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gold/20 border-t-gold" />
-            </div>
-          )}
-
-          {/* Next button */}
-          {selected && (
-            <div className="mt-10 flex justify-center animate-fade-up">
-              <button
-                onClick={onNext}
-                className="group relative overflow-hidden rounded-full bg-gold px-10 py-3.5 text-sm font-semibold text-ink transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20"
-              >
-                <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-                <span className="relative flex items-center gap-2">
-                  {locale === "ar" ? "التالي — اختيار الآيات" : "Next — Select Verses"}
-                  <IslamicStarIcon className="h-4 w-4 transition-transform group-hover:rotate-45" />
-                </span>
-              </button>
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gold/25 border-t-gold" />
             </div>
           )}
         </>
       )}
 
-      {hoveredSurah && (
-        <div
-          ref={hoverCardRef}
-          className="fixed z-50 animate-fade-up pointer-events-none"
-          style={{ top: hoverPos.top, left: hoverPos.left }}
-        >
-          <div className="rounded-sm border border-gold/30 bg-ink/95 backdrop-blur-xl px-6 py-3 shadow-xl shadow-gold/10 flex items-center gap-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gold/15 text-sm font-semibold text-gold">
-              {hoveredSurah.number}
+      {/* ── Sticky continue bar (thumb-reachable on mobile) ────── */}
+      {selected && (
+        <div className="fixed inset-x-0 bottom-0 z-40 pb-[env(safe-area-inset-bottom)]">
+          <div className="mx-auto max-w-xl px-4 pb-4">
+            <div className="panel-lit animate-step-in flex items-center gap-3 rounded-2xl p-3 pl-4 backdrop-blur-sm">
+              <AyahMarker
+                value={selected.number}
+                className="h-10 w-10 shrink-0"
+                active
+              />
+              <div className="min-w-0 flex-1">
+                <p
+                  className="truncate text-base leading-tight text-parchment"
+                  style={{ fontFamily: "'Amiri', serif" }}
+                  lang="ar"
+                  dir="rtl"
+                  translate="no"
+                >
+                  {selected.name}
+                </p>
+                <p className="truncate text-[13px] text-parchment-muted">
+                  {selected.englishName} · {selected.numberOfAyahs}{" "}
+                  {L({ en: "verses", fr: "versets", ar: "آية" })}
+                </p>
+              </div>
+              <button
+                onClick={onNext}
+                className="btn-primary flex shrink-0 items-center gap-2 px-5 py-3 text-[13px]"
+              >
+                {L({ en: "Continue", fr: "Continuer", ar: "التالي" })}
+                <ArrowIcon className="h-3.5 w-3.5 rtl:rotate-180" />
+              </button>
             </div>
-            <div>
-              <p className="text-sm font-medium text-parchment" style={{ fontFamily: "'Amiri', serif" }}>{hoveredSurah.name}</p>
-              <p className="text-xs text-parchment-muted">{hoveredSurah.englishName} — {hoveredSurah.englishNameTranslation}</p>
-            </div>
-            <span className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full ${hoveredSurah.revelationType === "Meccan" ? "bg-verdant/10 text-verdant/60" : "bg-azure/10 text-azure/60"}`}>
-              {hoveredSurah.revelationType === "Meccan" ? (locale === "ar" ? "مكية" : "Meccan") : (locale === "ar" ? "مدنية" : "Medinan")}
-            </span>
-            <span className="text-xs text-parchment-muted/60">{hoveredSurah.numberOfAyahs} {locale === "ar" ? "آية" : "verses"}</span>
           </div>
         </div>
       )}

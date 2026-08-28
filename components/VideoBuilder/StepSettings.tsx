@@ -1,35 +1,27 @@
 "use client";
 /**
- * StepSettings.tsx  —  Step 3: Platform → Reciter → Customise
+ * StepSettings.tsx — Step 3: Platform → Reciter → Customise
  *
- * UX changes:
- *  - Platform selection is now MANDATORY and lives at the very top as
- *    large visual cards. "Next" is disabled until a platform is chosen.
- *  - New customisation options: 8 Arabic fonts, 6 Latin fonts, text glow,
- *    text outline, frame decoration styles, verse spacing, solid/gradient bg,
- *    bg gradient controls, overlay style presets, and more.
- *  - Layout: platform picker full-width → then 3-col grid for the rest.
- *
- * This revision:
- *  - Fix: Quick Theme presets now switch background to "color" so the
- *    chosen gradient is actually visible, and the active preset is
- *    highlighted by comparing against current settings (not just bgColor).
- *  - Fix: "Video" background button now only opens the file picker;
- *    background is only set to "upload" once a real file lands
- *    (owned by VideoBuilder's handleFileUpload), so cancelling the
- *    dialog can no longer strand the preview on a missing video.
- *  - Fun/UX: 🎲 Surprise Me preset shuffle, ✨ applied/reset toasts,
- *    ↺ one-click customisation reset, a tiny audio equalizer instead of
- *    a single pulsing bar, a platform/reciter/theme summary strip, and
- *    tactile hover/press micro-animations throughout.
+ * Revision (Night Garden):
+ *  - Background sources reduced to two rich cards: Upload + Library
+ *    (Library = curated Pexels search, renamed from "Online").
+ *  - Pattern & Color backgrounds removed; Quick Themes removed.
+ *  - Supabase storage library disabled (commented out, restorable).
+ *  - Video tab leads with the background choice, then overlay, frame,
+ *    spacing and toggles. Text/Effects tabs unchanged in capability.
  */
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
 import {
-  GeometricRosette,
-  CrescentMoonIcon,
-  IslamicStarIcon,
-  IslamicDivider,
+  MicIcon,
+  FilmIcon,
+  TypeIcon,
+  SparklesIcon,
+  PaletteIcon,
+  UploadIcon,
+  LibraryIcon,
+  ResetIcon,
+  ArrowIcon,
   Spinner,
   CheckIcon,
   PlayIcon,
@@ -40,24 +32,24 @@ import {
   FacebookLogo,
   LandscapeLogo,
 } from "./icons";
-import { PLATFORMS, TEXT_POSITIONS, ANIMATED_BG } from "@/lib/quran";
+import { TEXT_POSITIONS } from "@/lib/quran";
 import type { Reciter } from "@/lib/quran";
+/* ── Supabase Library (disabled — restore by uncommenting) ──────
 import type { StorageVideo } from "@/lib/storage-client";
+──────────────────────────────────────────────────────────────── */
 import {
   ARABIC_FONTS,
   LATIN_FONTS,
   PLATFORM_META,
-  PRESETS,
   DEFAULT_SETTINGS,
   VideoSettings,
 } from "@/lib/types";
-import type { PlatformId, Preset } from "@/lib/types";
-import { searchPexelsVideos } from "@/lib/pexels-client";
-import type { PexelsVideo } from "@/lib/pexels-client";
+import type { PlatformId } from "@/lib/types";
 import {
-  fetchVideoDuration,
-  getCachedVideoDuration,
-} from "@/lib/video-meta";
+  getOutputResolution,
+  getDeviceProfile,
+} from "@/lib/device-profile";
+import { LibrarySearch } from "./settings/library-search";
 
 /* ── Text colour palette ─────────────────────────────────────── */
 const TEXT_COLORS = [
@@ -75,34 +67,62 @@ const TEXT_COLORS = [
   { id: "lavender", label: "Lavender", value: "#e6e6fa" },
 ];
 
-/* ── Background colour presets ───────────────────────────────── */
-const BG_COLOR_PRESETS = [
-  { label: "Deep Night", from: "#09090f", to: "#1a0e00" },
-  { label: "Midnight", from: "#0d0d1a", to: "#0a0a0a" },
-  { label: "Forest", from: "#0a1a0e", to: "#050d07" },
-  { label: "Ocean", from: "#050d1a", to: "#0a0514" },
-  { label: "Dusk", from: "#1a0a14", to: "#0d0709" },
-  { label: "Sahara", from: "#1a1205", to: "#090907" },
-];
-
 /* ── Overlay presets ─────────────────────────────────────────── */
+const OverlayGlyph = ({ kind }: { kind: "none" | "linear" | "radial" }) => (
+  <svg viewBox="0 0 24 24" className="mx-auto h-5 w-5" aria-hidden="true">
+    <rect
+      x="4"
+      y="4"
+      width="16"
+      height="16"
+      rx="2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+    />
+    {kind === "linear" && (
+      <path d="M4 14h16v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4z" fill="currentColor" opacity="0.45" />
+    )}
+    {kind === "radial" && (
+      <circle cx="12" cy="12" r="4.5" fill="currentColor" opacity="0.45" />
+    )}
+  </svg>
+);
+
 const OVERLAY_PRESETS = [
-  { id: "none", label: "None", icon: "○" },
-  { id: "linear", label: "Linear", icon: "▽" },
-  { id: "radial", label: "Radial", icon: "◎" },
+  { id: "none", label: "None" },
+  { id: "linear", label: "Linear" },
+  { id: "radial", label: "Radial" },
 ] as const;
 
 /* ── Frame decoration options ────────────────────────────────── */
+const FrameGlyph = ({ kind }: { kind: "none" | "corners" | "full" | "arch" }) => (
+  <svg viewBox="0 0 24 24" className="mx-auto h-5 w-5" aria-hidden="true">
+    {kind === "none" && (
+      <rect x="5" y="5" width="14" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="1.2" opacity="0.4" strokeDasharray="2.5 2.5" />
+    )}
+    {kind === "corners" && (
+      <path d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    )}
+    {kind === "full" && (
+      <rect x="5" y="5" width="14" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    )}
+    {kind === "arch" && (
+      <path d="M6 19v-7a6 6 0 0112 0v7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    )}
+  </svg>
+);
+
 const FRAME_STYLES = [
-  { id: "none", label: "None", preview: "○" },
-  { id: "corners", label: "Corners", preview: "⌐" },
-  { id: "full", label: "Full", preview: "□" },
-  { id: "arch", label: "Arch", preview: "⌒" },
+  { id: "none", label: "None" },
+  { id: "corners", label: "Corners" },
+  { id: "full", label: "Full" },
+  { id: "arch", label: "Arch" },
 ] as const;
 
 /* ── Keys reset by the "↺ Reset" button. Deliberately excludes
-   platform, background source, and any uploaded/library media — those
-   are the user's structural choices, not "look & feel" tweaks. ────── */
+   platform, background source, and any uploaded media — those are
+   the user's structural choices, not "look & feel" tweaks. ────── */
 const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
   "fontFamily",
   "textColor",
@@ -125,9 +145,6 @@ const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
   "frameStyle",
   "verseSpacing",
   "textAnimation",
-  "bgColor",
-  "bgColorSecondary",
-  "bgGradientAngle",
   "transitionStyle",
 ];
 
@@ -145,15 +162,16 @@ interface Props {
   audioError: string | null;
   onToggleAudio: () => void;
   canPreviewAudio: boolean;
+  /* ── Supabase Library (disabled — restore by uncommenting) ──
   storageVideos: StorageVideo[];
   videosLoading: boolean;
+  ──────────────────────────────────────────────────────────── */
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   uploadError: string | null;
   onBack: () => void;
   onNext: () => void;
   locale: string;
   totalDurationSec: number | null;
-  durationLoading: boolean;
 }
 
 export function StepSettings({
@@ -168,23 +186,24 @@ export function StepSettings({
   audioError,
   onToggleAudio,
   canPreviewAudio,
+  /* ── Supabase Library (disabled) ──
   storageVideos,
   videosLoading,
+  ────────────────────────────────── */
   onFileUpload,
   uploadError,
   onBack,
   onNext,
   locale,
   totalDurationSec,
-  durationLoading,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const toggle = (k: keyof VideoSettings) => onChange(k, !settings[k] as any);
 
-  const fmtDur = (sec: number) => {
-    const s = Math.round(sec);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  };
+  const ar = locale === "ar";
+  const fr = locale === "fr";
+  const L = (o: { en: string; fr: string; ar: string }) =>
+    ar ? o.ar : fr ? o.fr : o.en;
 
   /* ── Background-video playlist (ordered; index 0 plays first) ── */
   const playlist: string[] = settings.videoUrls ?? [];
@@ -205,9 +224,7 @@ export function StepSettings({
   /* ── Tabs for the customise panel ────────────────────────── */
   const [tab, setTab] = useState<"video" | "text" | "effects">("video");
 
-  const ar = locale === "ar";
-
-  /* ── Toast (✨ applied / ↺ reset feedback) ───────────────── */
+  /* ── Toast (↺ reset feedback) ────────────────────────────── */
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = useCallback((msg: string) => {
@@ -216,104 +233,68 @@ export function StepSettings({
     toastTimerRef.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
-  /* ── Which preset (if any) matches the current settings exactly ─ */
-  const activePresetId =
-    PRESETS.find((p) =>
-      Object.entries(p.settings).every(([k, v]) => (settings as any)[k] === v),
-    )?.id ?? null;
-  const activePreset = PRESETS.find((p) => p.id === activePresetId) ?? null;
-  const themeLabel = activePreset
-    ? ar
-      ? activePreset.nameAr
-      : activePreset.nameEn
-    : ar
-      ? "مخصص"
-      : "Custom";
-
-  const applyPreset = useCallback(
-    (p: Preset) => {
-      // Fix: presets never included `background`, so applying one while
-      // on "upload"/"library" changed the gradient invisibly. Force the
-      // Color panel so the result is actually visible.
-      onChange("background", "color");
-      Object.entries(p.settings).forEach(([k, v]) => {
-        (onChange as any)(k, v);
-      });
-      showToast(`✨ ${ar ? p.nameAr : p.nameEn} ${ar ? "مُطبّق" : "applied"}`);
-    },
-    [onChange, ar, showToast],
-  );
-
-  const handleSurpriseMe = useCallback(() => {
-    const pool = PRESETS.filter((p) => p.id !== activePresetId);
-    const choice = (pool.length ? pool : PRESETS)[
-      Math.floor(Math.random() * (pool.length ? pool.length : PRESETS.length))
-    ];
-    applyPreset(choice);
-  }, [activePresetId, applyPreset]);
-
   const handleResetCustomization = useCallback(() => {
     RESETTABLE_KEYS.forEach((k) => {
       (onChange as any)(k, DEFAULT_SETTINGS[k]);
     });
-    showToast(ar ? "↺ تمت إعادة الضبط" : "↺ Reset to defaults");
-  }, [onChange, ar, showToast]);
+    showToast(ar ? "تمت إعادة الضبط" : fr ? "Réinitialisé" : "Reset to defaults");
+  }, [onChange, ar, fr, showToast]);
+
+  const uploadedName = settings.uploadedVideoFile?.name ?? null;
 
   return (
-    <div className="animate-fade-up max-w-6xl mx-auto space-y-8">
+    <div className="animate-step-in mx-auto max-w-6xl space-y-10">
       {/* ══ Header ══════════════════════════════════════════════ */}
       <div className="text-center">
-        <IslamicDivider className="mb-4" />
         <h2 className="font-display text-3xl font-medium text-parchment sm:text-4xl">
-          {ar ? "القارئ والإعدادات" : "Reciter & Settings"}
+          {L({ en: "Reciter & Settings", fr: "Récitant & réglages", ar: "القارئ والإعدادات" })}
         </h2>
-        <p className="mt-2 text-parchment-muted text-sm">
-          {ar
-            ? "اختر المنصة أولاً ثم القارئ والتخصيصات"
-            : "Choose your platform first, then pick a reciter and customise"}
+        <p className="mt-2 text-sm text-parchment-muted">
+          {L({
+            en: "Choose your platform first, then pick a reciter and customise",
+            fr: "Choisissez d'abord la plateforme, puis le récitateur et le style",
+            ar: "اختر المنصة أولا ثم القارئ والتخصيصات",
+          })}
         </p>
 
-        {/* Fun: live summary strip — instant affirmation of choices so far */}
         {(platformChosen || selectedReciter) && (
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             {platformChosen && (
-              <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
-                🎬{" "}
+              <span className="flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/[0.06] px-3 py-1 text-[13px] text-parchment-muted">
+                <FilmIcon className="h-3 w-3 text-gold/70" />
                 {PLATFORM_META[settings.platform as PlatformId]?.label ??
                   settings.platform}
               </span>
             )}
             {selectedReciter && (
-              <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
-                🎙 {selectedReciter.englishName}
+              <span className="flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/[0.06] px-3 py-1 text-[13px] text-parchment-muted">
+                <MicIcon className="h-3 w-3 text-gold/70" />
+                {selectedReciter.englishName}
               </span>
             )}
-            <span className="rounded-full border border-gold/15 bg-gold/5 px-3 py-1 text-[11px] text-parchment-muted">
-              🎨 {themeLabel}
-            </span>
           </div>
         )}
       </div>
 
       {/* ══ 1. Platform Picker (MANDATORY) ══════════════════════ */}
       <section>
-        <div className="flex items-center gap-3 mb-4">
+        <div className="mb-4 flex items-center gap-3">
           <div className="h-px flex-1 bg-gold/10" />
-          <span className="text-xs font-semibold uppercase tracking-widest text-gold/50 flex items-center gap-1.5">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gold text-ink text-[10px] font-bold">
+          <span className="flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-widest text-gold/50">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[13px] font-bold text-ink">
               1
             </span>
-            {ar ? "اختر المنصة" : "Choose Platform"}
+            {L({ en: "Choose Platform", fr: "Choisir la plateforme", ar: "اختر المنصة" })}
             {!platformChosen && (
-              <span className="ml-1 rounded-full bg-gold/15 px-2 py-0.5 text-gold text-[9px] animate-pulse-gold">
-                {ar ? "مطلوب" : "required"}
+              <span className="ml-1 rounded-full bg-gold/15 px-2 py-0.5 text-xs text-gold">
+                {L({ en: "required", fr: "requis", ar: "مطلوب" })}
               </span>
             )}
           </span>
           <div className="h-px flex-1 bg-gold/10" />
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {(
             Object.entries(PLATFORM_META) as [
               PlatformId,
@@ -321,7 +302,11 @@ export function StepSettings({
             ][]
           ).map(([id, meta]) => {
             const active = settings.platform === id;
-            // Visual ratio indicator
+            const [encW, encH] = getOutputResolution(
+              meta.aspect,
+              getDeviceProfile().isLowPower,
+            );
+            const dimsLabel = `${encW}×${encH}`;
             const [w, h] =
               meta.aspect === "9:16"
                 ? [27, 48]
@@ -334,13 +319,12 @@ export function StepSettings({
                 onClick={() => onChange("platform", id)}
                 className={`platform-card${active ? " active" : ""} transition-transform duration-200 hover:-translate-y-0.5 active:scale-95`}
               >
-                {/* Aspect ratio silhouette */}
                 <div
                   className="relative flex items-center justify-center"
                   style={{ height: 56 }}
                 >
                   <div
-                    className={`rounded-sm border-2 flex items-center justify-center text-[10px] transition-all ${
+                    className={`flex items-center justify-center rounded-sm border-2 text-[13px] transition-all ${
                       active
                         ? "border-gold bg-gold/20 text-gold"
                         : "border-gold/25 bg-gold/5 text-gold/40"
@@ -367,19 +351,19 @@ export function StepSettings({
                     </span>
                   </div>
                   {active && (
-                    <div className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-gold flex items-center justify-center shadow-lg shadow-gold/30">
+                    <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold shadow-lg shadow-gold/30">
                       <CheckIcon className="h-2.5 w-2.5 text-ink" />
                     </div>
                   )}
                 </div>
                 <div className="text-center">
                   <p
-                    className={`text-xs font-semibold leading-tight ${active ? "text-gold" : "text-parchment"}`}
+                    className={`text-[13px] font-semibold leading-tight ${active ? "text-gold" : "text-parchment"}`}
                   >
                     {meta.label}
                   </p>
-                  <p className="text-[10px] text-parchment-muted/50 mt-0.5">
-                    {meta.dims}
+                  <p className="mt-0.5 text-[13px] text-parchment-muted/50">
+                    {dimsLabel}
                   </p>
                 </div>
               </button>
@@ -388,22 +372,22 @@ export function StepSettings({
         </div>
 
         {!platformChosen && (
-          <p className="text-center text-xs text-gold/40 mt-3">
-            {ar ? "← اختر منصة للمتابعة" : "← Pick a platform to continue"}
+          <p className="mt-3 text-center text-[13px] text-gold/40">
+            {L({ en: "← Pick a platform to continue", fr: "← Choisissez une plateforme pour continuer", ar: "← اختر منصة للمتابعة" })}
           </p>
         )}
       </section>
 
       {/* ══ 2. Reciter + Customise (shown after platform chosen) */}
       <div
-        className={`grid gap-6 lg:grid-cols-3 transition-all duration-300 ${!platformChosen ? "opacity-40 pointer-events-none select-none" : ""}`}
+        className={`grid gap-6 transition-all duration-300 lg:grid-cols-3 ${!platformChosen ? "pointer-events-none select-none opacity-40" : ""}`}
       >
         {/* ── Col 1: Reciter ────────────────────────────────── */}
-        <div className="kufic-frame p-5 rounded-sm space-y-4">
+        <div className="panel space-y-4 p-5">
           <SectionHead
-            icon={<GeometricRosette className="h-4 w-4 text-gold/40" />}
+            icon={<MicIcon className="h-4 w-4 text-gold/60" />}
             step={2}
-            label={ar ? "القارئ" : "Reciter"}
+            label={L({ en: "Reciter", fr: "Récitant", ar: "القارئ" })}
           />
 
           {recitersLoading ? (
@@ -411,49 +395,37 @@ export function StepSettings({
               <Spinner />
             </div>
           ) : (
-            <div className="space-y-2 max-h-[360px] overflow-y-auto custom-scrollbar pr-1">
+            <div className="custom-scrollbar max-h-[360px] space-y-2 overflow-y-auto pr-1">
               {reciters.map((r) => {
                 const active = selectedReciter?.identifier === r.identifier;
                 return (
                   <button
                     key={r.identifier}
                     onClick={() => onSelectReciter(r)}
-                    className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all duration-300 glow-hover ${
+                    className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all duration-300 ${
                       active
-                        ? "border-gold/40 bg-gold/10 ring-1 ring-gold/25"
-                        : "border-gold/10 hover:border-gold/25 hover:bg-ink-light/40"
+                        ? "border-gold/50 bg-gold/10 lit-soft"
+                        : "border-gold/10 hover:border-gold/30 hover:bg-ink-soft/60"
                     }`}
                   >
                     <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${active ? "border-gold/40 bg-gold/20" : "border-gold/15 bg-gold/5"}`}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${active ? "border-gold/50 bg-gold/20" : "border-gold/15 bg-gold/5"}`}
                     >
-                      <svg
-                        className="h-4 w-4 text-gold"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-                        />
-                      </svg>
+                      <MicIcon className="h-4 w-4 text-gold" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-parchment truncate">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-parchment">
                         {r.englishName}
                       </p>
                       <p
-                        className="text-xs text-parchment-muted truncate"
+                        className="truncate text-[13px] text-parchment-muted"
                         style={{ fontFamily: "'Amiri', serif" }}
                       >
                         {r.name}
                       </p>
                     </div>
                     {active && (
-                      <CheckIcon className="h-4 w-4 text-gold shrink-0" />
+                      <CheckIcon className="h-4 w-4 shrink-0 text-gold" />
                     )}
                   </button>
                 );
@@ -463,12 +435,17 @@ export function StepSettings({
 
           {/* Audio preview */}
           {canPreviewAudio && (
-            <div className="rounded-lg border border-gold/15 bg-ink-light/30 p-3">
+            <div className="rounded-xl border border-gold/20 bg-ink-soft/50 p-3">
               <div className="flex items-center gap-3">
                 <button
                   onClick={onToggleAudio}
                   disabled={audioLoading}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gold/20 text-gold hover:bg-gold/30 disabled:opacity-50 transition active:scale-90"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gold/20 text-gold transition hover:bg-gold/30 active:scale-90 disabled:opacity-50"
+                  aria-label={
+                    audioPlaying
+                      ? L({ en: "Pause audio preview", fr: "Mettre en pause", ar: "إيقاف المعاينة" })
+                      : L({ en: "Play audio preview", fr: "Écouter un extrait", ar: "تشغيل المعاينة" })
+                  }
                 >
                   {audioLoading ? (
                     <Spinner className="h-4 w-4" />
@@ -478,22 +455,19 @@ export function StepSettings({
                     <PlayIcon />
                   )}
                 </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-parchment-muted truncate">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] text-parchment-muted">
                     {audioError ||
                       (audioPlaying
-                        ? `▶ ${selectedReciter?.englishName}`
-                        : ar
-                          ? "معاينة الصوت"
-                          : "Preview audio")}
+                        ? selectedReciter?.englishName
+                        : L({ en: "Preview audio", fr: "Extrait audio", ar: "معاينة الصوت" }))}
                   </p>
-                  {/* Fun: tiny equalizer instead of a single pulsing bar */}
-                  <div className="mt-1.5 flex items-end gap-0.5 h-3">
+                  <div className="mt-1.5 flex h-3 items-end gap-0.5">
                     {audioPlaying ? (
                       [0, 1, 2, 3, 4].map((i) => (
                         <span
                           key={i}
-                          className="w-1 rounded-full bg-gold/50 animate-pulse"
+                          className="w-1 animate-pulse rounded-full bg-gold/60"
                           style={{
                             height: `${30 + (i % 3) * 25}%`,
                             animationDelay: `${i * 120}ms`,
@@ -510,144 +484,151 @@ export function StepSettings({
             </div>
           )}
 
-          {/* Reciter required hint */}
           {!selectedReciter && (
-            <p className="text-center text-[11px] text-gold/40 mt-1">
-              {ar ? "اختر قارئاً للمتابعة" : "Select a reciter to continue"}
+            <p className="mt-1 text-center text-[13px] text-gold/40">
+              {L({ en: "Select a reciter to continue", fr: "Choisissez un récitant pour continuer", ar: "اختر قارئا للمتابعة" })}
             </p>
           )}
         </div>
 
         {/* ── Col 2 & 3: Tabbed customisation panel ─────────── */}
-        <div className="lg:col-span-2 kufic-frame p-5 rounded-sm space-y-4">
+        <div className="panel space-y-4 p-5 lg:col-span-2">
           <div className="flex items-center justify-between">
             <SectionHead
-              icon={<CrescentMoonIcon className="h-4 w-4 text-gold/40" />}
+              icon={<PaletteIcon className="h-4 w-4 text-gold/60" />}
               step={3}
-              label={ar ? "التخصيص" : "Customise"}
+              label={L({ en: "Customise", fr: "Personnaliser", ar: "التخصيص" })}
             />
             <button
               onClick={handleResetCustomization}
-              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-parchment-muted/50 hover:text-gold hover:bg-gold/5 transition active:scale-95"
-              title={
-                ar ? "إعادة تعيين كل التخصيصات" : "Reset all customisation"
-              }
+              className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] text-parchment-dim transition hover:bg-gold/5 hover:text-gold active:scale-95"
+              title={L({ en: "Reset all customisation", fr: "Tout réinitialiser", ar: "إعادة تعيين كل التخصيصات" })}
             >
-              ↺ {ar ? "إعادة تعيين" : "Reset"}
+              <ResetIcon className="h-3 w-3" />
+              {L({ en: "Reset", fr: "Réinitialiser", ar: "إعادة تعيين" })}
             </button>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 rounded-lg bg-ink-light/30 p-1">
+          <div className="flex gap-1 rounded-xl bg-ink-soft/50 p-1">
             {(
               [
-                { id: "video", label: ar ? "الفيديو" : "Video", emoji: "🎬" },
-                { id: "text", label: ar ? "النص" : "Text", emoji: "✍️" },
+                {
+                  id: "video",
+                  label: L({ en: "Video", fr: "Vidéo", ar: "الفيديو" }),
+                  icon: <FilmIcon className="h-3.5 w-3.5" />,
+                },
+                {
+                  id: "text",
+                  label: L({ en: "Text", fr: "Texte", ar: "النص" }),
+                  icon: <TypeIcon className="h-3.5 w-3.5" />,
+                },
                 {
                   id: "effects",
-                  label: ar ? "التأثيرات" : "Effects",
-                  emoji: "🎭",
+                  label: L({ en: "Effects", fr: "Effets", ar: "التأثيرات" }),
+                  icon: <SparklesIcon className="h-3.5 w-3.5" />,
                 },
               ] as const
             ).map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`flex-1 rounded-md py-2 text-xs font-medium transition-all ${
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2.5 text-[13px] font-medium transition-all ${
                   tab === t.id
-                    ? "bg-gold/15 text-gold shadow-sm border border-gold/20"
+                    ? "border border-gold/25 bg-gold/15 text-gold"
                     : "text-parchment-muted hover:text-parchment"
                 }`}
               >
-                {t.emoji} {t.label}
+                {t.icon}
+                {t.label}
               </button>
             ))}
           </div>
 
-          {/* Toast: ✨ applied / ↺ reset feedback */}
+          {/* Toast */}
           {toast && (
-            <div className="animate-fade-up rounded-lg border border-gold/25 bg-gold/10 px-3 py-2 text-center text-xs text-gold">
+            <div className="animate-step-in rounded-xl border border-gold/30 bg-gold/10 px-3 py-2 text-center text-[13px] text-gold">
               {toast}
             </div>
           )}
 
           {/* ── TAB: Video ─────────────────────────────────── */}
           {tab === "video" && (
-            <div className="space-y-5 animate-fade-up">
-              {/* Presets */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-parchment-muted uppercase tracking-wider">
-                    {ar ? "ثيمات سريعة" : "Quick Themes"}
-                  </span>
+            <div className="animate-step-in space-y-5">
+              {/* Background source — two rich cards */}
+              <Field label={L({ en: "Background", fr: "Arrière-plan", ar: "نوع الخلفية" })}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {/* Upload */}
                   <button
-                    onClick={handleSurpriseMe}
-                    className="inline-flex items-center gap-1 rounded-full border border-gold/15 px-2.5 py-1 text-[10px] text-gold/70 hover:border-gold/35 hover:text-gold hover:-translate-y-0.5 active:scale-95 transition-all"
+                    onClick={() => fileRef.current?.click()}
+                    className={`group relative flex items-center gap-4 rounded-2xl border p-4 text-left transition-all duration-300 active:scale-[0.98] ${
+                      settings.background === "upload"
+                        ? "border-gold/55 bg-gold/[0.08] lit-soft"
+                        : "border-gold/15 bg-ink-light/40 hover:-translate-y-0.5 hover:border-gold/35 hover:bg-ink-light/70"
+                    }`}
                   >
-                    🎲 {ar ? "فاجئني" : "Surprise Me"}
+                    <span
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                        settings.background === "upload"
+                          ? "border-gold/60 bg-gold/20 text-gold"
+                          : "border-gold/20 bg-gold/[0.06] text-gold/70 group-hover:border-gold/40"
+                      }`}
+                    >
+                      <UploadIcon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-parchment">
+                        {L({ en: "Upload your own", fr: "Votre propre vidéo", ar: "ارفع فيديو خاصا" })}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[13px] text-parchment-dim">
+                        {settings.background === "upload" && uploadedName
+                          ? uploadedName
+                          : L({ en: "MP4 or MOV · up to 150MB", fr: "MP4 ou MOV · 150 Mo max", ar: "MP4 أو MOV حتى 150 م.ب" })}
+                      </span>
+                    </span>
+                    {settings.background === "upload" && (
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gold shadow-[0_4px_10px_-2px_rgb(var(--gold)/0.6)]">
+                        <CheckIcon className="h-3 w-3 text-ink" />
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Library (Pexels) */}
+                  <button
+                    onClick={() => onChange("background", "pexels")}
+                    className={`group relative flex items-center gap-4 rounded-2xl border p-4 text-left transition-all duration-300 active:scale-[0.98] ${
+                      settings.background === "pexels"
+                        ? "border-gold/55 bg-gold/[0.08] lit-soft"
+                        : "border-gold/15 bg-ink-light/40 hover:-translate-y-0.5 hover:border-gold/35 hover:bg-ink-light/70"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                        settings.background === "pexels"
+                          ? "border-gold/60 bg-gold/20 text-gold"
+                          : "border-gold/20 bg-gold/[0.06] text-gold/70 group-hover:border-gold/40"
+                      }`}
+                    >
+                      <LibraryIcon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-parchment">
+                        {L({ en: "Library", fr: "Bibliothèque", ar: "المكتبة" })}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[13px] text-parchment-dim">
+                        {playlist.length > 0
+                          ? L({ en: `${playlist.length} clip${playlist.length > 1 ? "s" : ""} selected`, fr: `${playlist.length} clip${playlist.length > 1 ? "s" : ""} sélectionné${playlist.length > 1 ? "s" : ""}`, ar: `${playlist.length} مقطع محدد` })
+                          : L({ en: "Curated cinematic clips", fr: "Clips cinématiques choisis", ar: "مقاطع سينمائية مختارة" })}
+                      </span>
+                    </span>
+                    {settings.background === "pexels" && (
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gold shadow-[0_4px_10px_-2px_rgb(var(--gold)/0.6)]">
+                        <CheckIcon className="h-3 w-3 text-ink" />
+                      </span>
+                    )}
                   </button>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {PRESETS.map((p) => {
-                    const isActive = activePresetId === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => applyPreset(p)}
-                        className="relative rounded-lg border py-2 px-1.5 text-center transition-all duration-200 hover:border-gold/30 hover:bg-gold/5 hover:-translate-y-1 hover:shadow-lg hover:shadow-gold/10 active:scale-95"
-                        style={{
-                          borderColor: isActive
-                            ? "rgba(212,175,55,0.4)"
-                            : "rgba(212,175,55,0.1)",
-                          background: isActive
-                            ? "rgba(212,175,55,0.1)"
-                            : "transparent",
-                        }}
-                        title={ar ? p.nameAr : p.nameEn}
-                      >
-                        {isActive && (
-                          <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-ink text-[9px] shadow shadow-gold/40">
-                            ✓
-                          </span>
-                        )}
-                        <span className="text-lg block">{p.emoji}</span>
-                        <span className="text-[9px] text-parchment-muted block leading-tight mt-0.5">
-                          {ar ? p.nameAr : p.nameEn}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
 
-              {/* Background source */}
-              <Field label={ar ? "نوع الخلفية" : "Background"}>
-                <div className="grid grid-cols-4 gap-2">
-                  <ToggleBtn
-                    active={settings.background === "color"}
-                    onClick={() => onChange("background", "color")}
-                  >
-                    🎨 {ar ? "لون" : "Color"}
-                  </ToggleBtn>
-                  <ToggleBtn
-                    active={settings.background === "upload"}
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    📁 {ar ? "رفع" : "Upload"}
-                  </ToggleBtn>
-                  <ToggleBtn
-                    active={settings.background === "library"}
-                    onClick={() => onChange("background", "library")}
-                  >
-                    🗂 {ar ? "مكتبة" : "Library"}
-                  </ToggleBtn>
-                  <ToggleBtn
-                    active={settings.background === "pexels"}
-                    onClick={() => onChange("background", "pexels")}
-                  >
-                    🎬 {ar ? "اونلاين" : "Online"}
-                  </ToggleBtn>
-                </div>
                 <input
                   ref={fileRef}
                   type="file"
@@ -655,118 +636,33 @@ export function StepSettings({
                   className="hidden"
                   onChange={onFileUpload}
                 />
-                <p className="text-[10px] text-parchment-muted/40 mt-1.5">
-                  {ar
-                    ? "MP4 أو MOV حتى 150 ميجابايت"
-                    : "MP4 or MOV, up to 150MB"}
-                </p>
                 {uploadError && (
-                  <p className="text-xs text-red-400 mt-1">{uploadError}</p>
+                  <p className="mt-2 text-[13px] text-red-400">{uploadError}</p>
                 )}
                 {settings.background === "upload" &&
                   settings.uploadedVideoUrl && (
-                    <p className="text-xs text-verdant/70 mt-1">
-                      ✓ {ar ? "تم تحميل الفيديو" : "Video loaded"}
+                    <p className="mt-2 flex items-center gap-1 text-[13px] text-verdant">
+                      <CheckIcon className="h-3 w-3" />
+                      {L({ en: "Video loaded", fr: "Vidéo chargée", ar: "تم تحميل الفيديو" })}
                     </p>
                   )}
               </Field>
 
-              {/* Solid / gradient colour bg */}
-              {settings.background === "color" && (
-                <div className="space-y-3 rounded-lg border border-gold/10 bg-ink-light/20 p-4">
-                  <p className="text-xs text-parchment-muted uppercase tracking-wider mb-2">
-                    {ar ? "إعدادات اللون" : "Color Settings"}
-                  </p>
-
-                  {/* Presets */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {BG_COLOR_PRESETS.map((p) => (
-                      <button
-                        key={p.label}
-                        onClick={() => {
-                          onChange("bgColor", p.from);
-                          onChange("bgColorSecondary", p.to);
-                        }}
-                        className={`rounded-md border px-2 py-2 text-[11px] text-center transition-all hover:-translate-y-0.5 active:scale-95 ${
-                          settings.bgColor === p.from
-                            ? "border-gold/40 text-gold bg-gold/10"
-                            : "border-gold/10 text-parchment-muted hover:border-gold/20"
-                        }`}
-                        style={{
-                          background: `linear-gradient(135deg, ${p.from}, ${p.to})`,
-                        }}
-                      >
-                        <span className="text-parchment/80 drop-shadow">
-                          {p.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Custom pickers */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] text-parchment-muted/60 block mb-1">
-                        {ar ? "اللون الأول" : "From color"}
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={settings.bgColor}
-                          onChange={(e) => onChange("bgColor", e.target.value)}
-                          className="h-8 w-10 rounded cursor-pointer border border-gold/20 bg-transparent"
-                        />
-                        <span className="text-[10px] text-parchment-muted/50 font-mono">
-                          {settings.bgColor}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-parchment-muted/60 block mb-1">
-                        {ar ? "اللون الثاني" : "To color"}
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={settings.bgColorSecondary}
-                          onChange={(e) =>
-                            onChange("bgColorSecondary", e.target.value)
-                          }
-                          className="h-8 w-10 rounded cursor-pointer border border-gold/20 bg-transparent"
-                        />
-                        <span className="text-[10px] text-parchment-muted/50 font-mono">
-                          {settings.bgColorSecondary}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Field
-                    label={`${ar ? "زاوية التدرج" : "Gradient angle"}: ${settings.bgGradientAngle}°`}
-                  >
-                    <input
-                      type="range"
-                      min={0}
-                      max={360}
-                      value={settings.bgGradientAngle}
-                      onChange={(e) =>
-                        onChange("bgGradientAngle", parseInt(e.target.value))
-                      }
-                      className="slider"
-                    />
-                  </Field>
-
-                  {/* Live preview strip */}
-                  <div
-                    className="h-8 rounded-md border border-gold/10"
-                    style={{
-                      background: `linear-gradient(${settings.bgGradientAngle}deg, ${settings.bgColor}, ${settings.bgColorSecondary})`,
-                    }}
-                  />
-                </div>
+              {/* Library search (Pexels) */}
+              {settings.background === "pexels" && (
+                <LibrarySearch
+                  ar={ar}
+                  fr={fr}
+                  selected={playlist}
+                  onSelect={(url) => togglePlaylist(url)}
+                  onRemove={removeFromPlaylist}
+                  onClear={clearPlaylist}
+                  totalSec={totalDurationSec}
+                  locale={locale}
+                />
               )}
 
-              {/* Video library */}
+              {/* ══ Supabase Library (disabled — restore by uncommenting) ══
               {settings.background === "library" && (
                 <div className="space-y-2">
                   {videosLoading ? (
@@ -774,7 +670,7 @@ export function StepSettings({
                       <Spinner className="h-5 w-5 text-gold" />
                     </div>
                   ) : storageVideos.length === 0 ? (
-                    <p className="text-xs text-parchment-muted/40 py-4 text-center">
+                    <p className="text-[13px] text-parchment-muted/40 py-4 text-center">
                       {ar ? "لا توجد فيديوهات" : "No videos in library"}
                     </p>
                   ) : (
@@ -787,7 +683,7 @@ export function StepSettings({
                             <button
                               key={v.id}
                               onClick={() => togglePlaylist(v.url)}
-                              className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
+                              className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-soft group ${
                                 sel
                                   ? "border-gold ring-2 ring-gold/30"
                                   : "border-gold/10 hover:border-gold/30"
@@ -814,7 +710,7 @@ export function StepSettings({
                               {sel && (
                                 <>
                                   <div className="absolute inset-0 bg-gold/10" />
-                                  <span className="absolute top-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-ink shadow">
+                                  <span className="absolute top-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[13px] font-bold text-ink shadow">
                                     {idx + 1}
                                   </span>
                                 </>
@@ -825,69 +721,12 @@ export function StepSettings({
                       </div>
                     </div>
                   )}
-
-                  {/* Selected playlist chips (order = play order) + totals/clear row */}
-                  {playlist.length > 0 && (
-                    <div className="rounded-lg border border-gold/15 bg-ink-light/20 p-2.5">
-                      <p className="mb-2 text-[10px] uppercase tracking-wider text-parchment-muted/70">
-                        {ar
-                          ? "ترتيب التشغيل"
-                          : locale === "fr"
-                            ? "Ordre de lecture"
-                            : "Play order"}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {playlist.map((u, idx) => (
-                          <span
-                            key={u}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold/10 px-2 py-0.5 text-[10px] text-gold"
-                          >
-                            <span className="font-semibold">{idx + 1}</span>
-                            <span className="max-w-[7rem] truncate opacity-80">
-                              {u.split("/").pop() || "video"}
-                            </span>
-                            <button
-                              onClick={() => removeFromPlaylist(u)}
-                              aria-label="Remove"
-                              className="rounded-full p-0.5 hover:bg-red-500/20 hover:text-red-300 transition"
-                            >
-                              <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* One simple line: total footage + clear all */}
-                      <PlaylistTotals
-                        urls={playlist}
-                        totalSec={totalDurationSec}
-                        ar={ar}
-                        locale={locale}
-                        onClearAll={clearPlaylist}
-                      />
-                    </div>
-                  )}
                 </div>
               )}
-
-              {/* Pexels video search */}
-              {settings.background === "pexels" && (
-                <PexelsSearch
-                  ar={ar}
-                  selected={playlist}
-                  onSelect={(url) => togglePlaylist(url)}
-                  onRemove={removeFromPlaylist}
-                  onClear={clearPlaylist}
-                  totalSec={totalDurationSec}
-                  durationLoading={durationLoading}
-                  locale={locale}
-                />
-              )}
+              ══════════════════════════════════════════════════════════ */}
 
               {/* Overlay style */}
-              <Field label={ar ? "نوع التظليل" : "Overlay Style"}>
+              <Field label={L({ en: "Overlay Style", fr: "Style de voile", ar: "نوع التظليل" })}>
                 <div className="grid grid-cols-3 gap-2">
                   {OVERLAY_PRESETS.map((o) => (
                     <ToggleBtn
@@ -895,8 +734,8 @@ export function StepSettings({
                       active={settings.overlayStyle === o.id}
                       onClick={() => onChange("overlayStyle", o.id)}
                     >
-                      <span className="text-base">{o.icon}</span>
-                      <span className="block text-[10px] mt-0.5">
+                      <OverlayGlyph kind={o.id} />
+                      <span className="mt-0.5 block text-[13px]">
                         {o.label}
                       </span>
                     </ToggleBtn>
@@ -906,7 +745,7 @@ export function StepSettings({
 
               {/* Background darkness */}
               <Field
-                label={`${ar ? "تعتيم" : "Darkness"}: ${settings.bgOverlay}%`}
+                label={`${L({ en: "Darkness", fr: "Obscurité", ar: "تعتيم" })}: ${settings.bgOverlay}%`}
               >
                 <input
                   type="range"
@@ -921,16 +760,16 @@ export function StepSettings({
               </Field>
 
               {/* Frame decoration */}
-              <Field label={ar ? "إطار الفيديو" : "Frame Decoration"}>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <Field label={L({ en: "Frame Decoration", fr: "Cadre décoratif", ar: "إطار الفيديو" })}>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {FRAME_STYLES.map((f) => (
                     <ToggleBtn
                       key={f.id}
                       active={settings.frameStyle === f.id}
                       onClick={() => onChange("frameStyle", f.id)}
                     >
-                      <span className="text-lg">{f.preview}</span>
-                      <span className="block text-[10px] mt-0.5">
+                      <FrameGlyph kind={f.id} />
+                      <span className="mt-0.5 block text-[13px]">
                         {f.label}
                       </span>
                     </ToggleBtn>
@@ -940,7 +779,7 @@ export function StepSettings({
 
               {/* Verse spacing */}
               <Field
-                label={`${ar ? "صمت بين الآيات" : "Pause between verses"}: ${settings.verseSpacing}s`}
+                label={`${L({ en: "Pause between verses", fr: "Pause entre versets", ar: "صمت بين الآيات" })}: ${settings.verseSpacing}s`}
               >
                 <input
                   type="range"
@@ -953,32 +792,34 @@ export function StepSettings({
                   }
                   className="slider"
                 />
-                <p className="text-[10px] text-parchment-muted/40 mt-1">
-                  {ar
-                    ? "ثواني إضافية بعد كل آية"
-                    : "Extra seconds of silence after each ayah"}
+                <p className="mt-1 text-[13px] text-parchment-muted/40">
+                  {L({
+                    en: "Extra seconds of silence after each ayah",
+                    fr: "Secondes de silence après chaque ayah",
+                    ar: "ثواني إضافية بعد كل آية",
+                  })}
                 </p>
               </Field>
 
               {/* Toggles */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
                 {(
                   [
                     {
                       key: "showSurahName",
-                      label: ar ? "اسم السورة" : "Surah Badge",
+                      label: L({ en: "Surah Badge", fr: "Badge sourate", ar: "اسم السورة" }),
                     },
                     {
                       key: "showVerseNumber",
-                      label: ar ? "رقم الآية" : "Verse No.",
+                      label: L({ en: "Verse No.", fr: "N° de verset", ar: "رقم الآية" }),
                     },
                     {
                       key: "showTranslation",
-                      label: ar ? "الترجمة" : "Translation",
+                      label: L({ en: "Translation", fr: "Traduction", ar: "الترجمة" }),
                     },
                     {
                       key: "showWatermark",
-                      label: ar ? "علامة مائية" : "Watermark",
+                      label: L({ en: "Watermark", fr: "Filigrane", ar: "علامة مائية" }),
                     },
                   ] as const
                 ).map(({ key, label }) => (
@@ -993,7 +834,7 @@ export function StepSettings({
 
               {/* Translation language (only visible when translation enabled) */}
               {settings.showTranslation && (
-                <Field label={ar ? "لغة الترجمة" : "Translation Language"}>
+                <Field label={L({ en: "Translation Language", fr: "Langue de traduction", ar: "لغة الترجمة" })}>
                   <div className="flex gap-2">
                     {[
                       { id: "en", label: "English" },
@@ -1014,13 +855,13 @@ export function StepSettings({
 
               {/* Watermark text */}
               {settings.showWatermark && (
-                <Field label={ar ? "نص العلامة المائية" : "Watermark Text"}>
+                <Field label={L({ en: "Watermark Text", fr: "Texte du filigrane", ar: "نص العلامة المائية" })}>
                   <input
                     type="text"
                     value={settings.watermarkText}
                     onChange={(e) => onChange("watermarkText", e.target.value)}
                     placeholder="@midhkar"
-                    className="w-full rounded-lg border border-gold/20 bg-ink-light/40 px-3 py-2 text-sm text-parchment placeholder-parchment-muted/30 outline-none focus:border-gold/40 focus:ring-1 focus:ring-gold/20 transition"
+                    className="w-full rounded-lg border border-gold/20 bg-ink-soft/40 px-3 py-2 text-sm text-parchment placeholder-parchment-dim outline-none transition focus:border-gold/40 focus:ring-1 focus:ring-gold/20"
                   />
                 </Field>
               )}
@@ -1029,9 +870,9 @@ export function StepSettings({
 
           {/* ── TAB: Text ──────────────────────────────────── */}
           {tab === "text" && (
-            <div className="space-y-5 animate-fade-up">
+            <div className="animate-step-in space-y-5">
               {/* Font size */}
-              <Field label={ar ? "حجم النص" : "Font Size"}>
+              <Field label={L({ en: "Font Size", fr: "Taille du texte", ar: "حجم النص" })}>
                 <div className="grid grid-cols-3 gap-2">
                   {(["small", "medium", "large"] as const).map((sz) => (
                     <ToggleBtn
@@ -1058,8 +899,8 @@ export function StepSettings({
               </Field>
 
               {/* Arabic font */}
-              <Field label={ar ? "الخط العربي" : "Arabic Font"}>
-                <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+              <Field label={L({ en: "Arabic Font", fr: "Police arabe", ar: "الخط العربي" })}>
+                <div className="custom-scrollbar grid max-h-56 grid-cols-2 gap-2 overflow-y-auto pr-1">
                   {ARABIC_FONTS.map((f) => (
                     <button
                       key={f.id}
@@ -1072,7 +913,7 @@ export function StepSettings({
                       >
                         بِسْمِ اللّٰهِ
                       </p>
-                      <p className="text-[10px] text-parchment-muted/60 mt-1">
+                      <p className="mt-1 text-[13px] text-parchment-muted/60">
                         {f.name}
                       </p>
                     </button>
@@ -1081,7 +922,7 @@ export function StepSettings({
               </Field>
 
               {/* Text position */}
-              <Field label={ar ? "موضع النص" : "Text Position"}>
+              <Field label={L({ en: "Text Position", fr: "Position du texte", ar: "موضع النص" })}>
                 <div className="grid grid-cols-3 gap-2">
                   {TEXT_POSITIONS.map((pos) => (
                     <ToggleBtn
@@ -1089,20 +930,48 @@ export function StepSettings({
                       active={settings.textPosition === pos.id}
                       onClick={() => onChange("textPosition", pos.id)}
                     >
-                      {pos.id === "top"
-                        ? "⬆ "
-                        : pos.id === "center"
-                          ? "◉ "
-                          : "⬇ "}
-                      {pos.label}
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="mx-auto h-5 w-5"
+                        aria-hidden="true"
+                      >
+                        <rect
+                          x="4"
+                          y="4"
+                          width="16"
+                          height="16"
+                          rx="2"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.2"
+                          opacity="0.5"
+                        />
+                        <rect
+                          x="7"
+                          y={
+                            pos.id === "top"
+                              ? 7
+                              : pos.id === "center"
+                                ? 11
+                                : 15
+                          }
+                          width="10"
+                          height="2"
+                          rx="1"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span className="mt-0.5 block text-[13px]">
+                        {pos.label}
+                      </span>
                     </ToggleBtn>
                   ))}
                 </div>
               </Field>
 
               {/* Text colour */}
-              <Field label={ar ? "لون النص" : "Text Color"}>
-                <div className="flex flex-wrap gap-2 mb-3">
+              <Field label={L({ en: "Text Color", fr: "Couleur du texte", ar: "لون النص" })}>
+                <div className="mb-3 flex flex-wrap gap-2">
                   {TEXT_COLORS.map((c) => (
                     <button
                       key={c.id}
@@ -1118,9 +987,9 @@ export function StepSettings({
                     type="color"
                     value={settings.textColor}
                     onChange={(e) => onChange("textColor", e.target.value)}
-                    className="h-7 w-10 rounded cursor-pointer border border-gold/20 bg-transparent"
+                    className="h-7 w-10 cursor-pointer rounded border border-gold/20 bg-transparent"
                   />
-                  <span className="text-[10px] text-parchment-muted/50 font-mono">
+                  <span className="font-mono text-[13px] text-parchment-muted/50">
                     {settings.textColor}
                   </span>
                 </div>
@@ -1128,7 +997,7 @@ export function StepSettings({
 
               {/* Text opacity */}
               <Field
-                label={`${ar ? "شفافية النص" : "Text Opacity"}: ${settings.textOpacity}%`}
+                label={`${L({ en: "Text Opacity", fr: "Opacité du texte", ar: "شفافية النص" })}: ${settings.textOpacity}%`}
               >
                 <input
                   type="range"
@@ -1144,12 +1013,12 @@ export function StepSettings({
 
               {/* Translation section */}
               {settings.showTranslation && (
-                <div className="border-t border-gold/10 pt-4 space-y-4">
-                  <p className="text-xs text-parchment-muted uppercase tracking-wider">
-                    {ar ? "إعدادات الترجمة" : "Translation Style"}
+                <div className="space-y-4 border-t border-gold/10 pt-4">
+                  <p className="text-[13px] uppercase tracking-wider text-parchment-muted">
+                    {L({ en: "Translation Style", fr: "Style de traduction", ar: "إعدادات الترجمة" })}
                   </p>
 
-                  <Field label={ar ? "خط الترجمة" : "Translation Font"}>
+                  <Field label={L({ en: "Translation Font", fr: "Police de traduction", ar: "خط الترجمة" })}>
                     <div className="grid grid-cols-2 gap-2">
                       {LATIN_FONTS.map((f) => (
                         <button
@@ -1165,7 +1034,7 @@ export function StepSettings({
                           >
                             In the name
                           </p>
-                          <p className="text-[10px] text-parchment-muted/60 mt-0.5">
+                          <p className="mt-0.5 text-[13px] text-parchment-muted/60">
                             {f.name}
                           </p>
                         </button>
@@ -1173,7 +1042,7 @@ export function StepSettings({
                     </div>
                   </Field>
 
-                  <Field label={ar ? "لون الترجمة" : "Translation Color"}>
+                  <Field label={L({ en: "Translation Color", fr: "Couleur de traduction", ar: "لون الترجمة" })}>
                     <div className="flex items-center gap-2">
                       <input
                         type="color"
@@ -1181,16 +1050,16 @@ export function StepSettings({
                         onChange={(e) =>
                           onChange("translationColor", e.target.value)
                         }
-                        className="h-7 w-10 rounded cursor-pointer border border-gold/20 bg-transparent"
+                        className="h-7 w-10 cursor-pointer rounded border border-gold/20 bg-transparent"
                       />
-                      <span className="text-[10px] text-parchment-muted/50 font-mono">
+                      <span className="font-mono text-[13px] text-parchment-muted/50">
                         {settings.translationColor}
                       </span>
                     </div>
                   </Field>
 
                   <Field
-                    label={`${ar ? "شفافية الترجمة" : "Translation Opacity"}: ${settings.translationOpacity}%`}
+                    label={`${L({ en: "Translation Opacity", fr: "Opacité de traduction", ar: "شفافية الترجمة" })}: ${settings.translationOpacity}%`}
                   >
                     <input
                       type="range"
@@ -1210,40 +1079,56 @@ export function StepSettings({
 
           {/* ── TAB: Effects ───────────────────────────────── */}
           {tab === "effects" && (
-            <div className="space-y-5 animate-fade-up">
-              <p className="text-xs text-parchment-muted/50">
-                {ar
-                  ? "تأثيرات بصرية تُطبَّق على النص والخلفية"
-                  : "Visual effects applied to text and background"}
+            <div className="animate-step-in space-y-5">
+              <p className="text-[13px] text-parchment-muted/50">
+                {L({
+                  en: "Visual effects applied to text and background",
+                  fr: "Effets visuels appliqués au texte et au fond",
+                  ar: "تأثيرات بصرية تُطبَّع على النص والخلفية",
+                })}
               </p>
 
               {/* Text effects grid */}
-              <Field label={ar ? "تأثيرات النص" : "Text Effects"}>
-                <div className="grid grid-cols-2 gap-3">
+              <Field label={L({ en: "Text Effects", fr: "Effets de texte", ar: "تأثيرات النص" })}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {(
                     [
                       {
                         key: "textShadow",
-                        label: ar ? "ظل النص" : "Text Shadow",
-                        emoji: "🌑",
+                        label: L({ en: "Text Shadow", fr: "Ombre du texte", ar: "ظل النص" }),
+                        icon: (
+                          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                            <path d="M7 17h10M9 13h6" strokeLinecap="round" opacity="0.5" />
+                            <path d="M6 9h12" strokeLinecap="round" />
+                          </svg>
+                        ),
                       },
                       {
                         key: "textGlow",
-                        label: ar ? "توهج ذهبي" : "Golden Glow",
-                        emoji: "✨",
+                        label: L({ en: "Golden Glow", fr: "Halo doré", ar: "توهج ذهبي" }),
+                        icon: <SparklesIcon className="h-5 w-5" />,
                       },
                       {
                         key: "textOutline",
-                        label: ar ? "حدود النص" : "Text Outline",
-                        emoji: "◻",
+                        label: L({ en: "Text Outline", fr: "Contour du texte", ar: "حدود النص" }),
+                        icon: (
+                          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                            <rect x="5" y="5" width="14" height="14" rx="2" />
+                          </svg>
+                        ),
                       },
                       {
                         key: "textAnimation" as const,
-                        label: ar ? "ظهور تدريجي" : "Fade In",
-                        emoji: "🌅",
+                        label: L({ en: "Fade In", fr: "Fondu d'entrée", ar: "ظهور تدريجي" }),
+                        icon: (
+                          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                            <path d="M12 3v3M5.6 5.6l2.1 2.1M3 12h3M18.4 5.6l-2.1 2.1M21 12h-3" strokeLinecap="round" />
+                            <path d="M7 17a5 5 0 0110 0" strokeLinecap="round" />
+                          </svg>
+                        ),
                       },
                     ] as const
-                  ).map(({ key, label, emoji }) => (
+                  ).map(({ key, label, icon }) => (
                     <button
                       key={key}
                       onClick={() =>
@@ -1256,37 +1141,29 @@ export function StepSettings({
                             )
                           : toggle(key)
                       }
-                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-all hover:-translate-y-0.5 active:scale-95 ${
+                      className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all active:scale-95 ${
                         key === "textAnimation"
                           ? settings.textAnimation !== "none"
-                            ? "border-gold/40 bg-gold/10 ring-1 ring-gold/20"
-                            : "border-gold/10 hover:border-gold/20 bg-ink-light/20"
+                            ? "border-gold/50 bg-gold/10 lit-soft"
+                            : "border-gold/10 bg-ink-soft/40 hover:border-gold/30"
                           : settings[key]
-                            ? "border-gold/40 bg-gold/10 ring-1 ring-gold/20"
-                            : "border-gold/10 hover:border-gold/20 bg-ink-light/20"
+                            ? "border-gold/50 bg-gold/10 lit-soft"
+                            : "border-gold/10 bg-ink-soft/40 hover:border-gold/30"
                       }`}
                     >
-                      <span className="text-xl">{emoji}</span>
+                      <span className="text-gold">{icon}</span>
                       <div>
-                        <p className="text-xs font-medium text-parchment">
+                        <p className="text-[13px] font-medium text-parchment">
                           {label}
                         </p>
-                        <p className="text-[10px] text-parchment-muted/40">
+                        <p className="text-[13px] text-parchment-dim">
                           {key === "textAnimation"
                             ? settings.textAnimation !== "none"
-                              ? ar
-                                ? "مفعّل"
-                                : "On"
-                              : ar
-                                ? "معطّل"
-                                : "Off"
+                              ? L({ en: "On", fr: "Activé", ar: "مفعّل" })
+                              : L({ en: "Off", fr: "Désactivé", ar: "معطّل" })
                             : settings[key]
-                              ? ar
-                                ? "مفعّل"
-                                : "On"
-                              : ar
-                                ? "معطّل"
-                                : "Off"}
+                              ? L({ en: "On", fr: "Activé", ar: "مفعّل" })
+                              : L({ en: "Off", fr: "Désactivé", ar: "معطّل" })}
                         </p>
                       </div>
                       <div className="ml-auto">
@@ -1302,25 +1179,47 @@ export function StepSettings({
               </Field>
 
               {/* Transition style */}
-              <Field label={ar ? "انتقال بين الآيات" : "Verse Transition"}>
+              <Field label={L({ en: "Verse Transition", fr: "Transition entre versets", ar: "انتقال بين الآيات" })}>
                 <div className="grid grid-cols-4 gap-2">
                   {[
-                    {
-                      id: "none" as const,
-                      label: ar ? "بدون" : "None",
-                      icon: "▬",
-                    },
-                    { id: "fade" as const, label: "Fade", icon: "◐" },
-                    { id: "slide" as const, label: "Slide", icon: "⇧" },
-                    { id: "scale" as const, label: "Scale", icon: "⊕" },
+                    { id: "none" as const, label: L({ en: "None", fr: "Aucune", ar: "بدون" }) },
+                    { id: "fade" as const, label: "Fade" },
+                    { id: "slide" as const, label: "Slide" },
+                    { id: "scale" as const, label: "Scale" },
                   ].map((t) => (
                     <ToggleBtn
                       key={t.id}
                       active={settings.transitionStyle === t.id}
                       onClick={() => onChange("transitionStyle", t.id)}
                     >
-                      <span className="text-sm">{t.icon}</span>
-                      <span className="block text-[10px] mt-0.5">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="mx-auto h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        aria-hidden="true"
+                      >
+                        {t.id === "none" && (
+                          <path d="M5 12h14" strokeLinecap="round" opacity="0.5" />
+                        )}
+                        {t.id === "fade" && (
+                          <>
+                            <circle cx="9" cy="12" r="4" opacity="0.4" />
+                            <circle cx="15" cy="12" r="4" />
+                          </>
+                        )}
+                        {t.id === "slide" && (
+                          <path d="M4 12h13m0 0l-3.5-3.5M17 12l-3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+                        )}
+                        {t.id === "scale" && (
+                          <>
+                            <rect x="9" y="9" width="6" height="6" rx="1" opacity="0.4" />
+                            <path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" strokeLinecap="round" />
+                          </>
+                        )}
+                      </svg>
+                      <span className="mt-0.5 block text-[13px]">
                         {t.label}
                       </span>
                     </ToggleBtn>
@@ -1330,62 +1229,46 @@ export function StepSettings({
 
               {/* Text glow colour hint */}
               {settings.textGlow && (
-                <div className="rounded-lg border border-gold/15 bg-gold/5 p-3 text-xs text-parchment-muted/60">
-                  💡{" "}
-                  {ar
-                    ? "يُضاف هالة ذهبية حول الخط العربي."
-                    : "A soft golden halo is added around the Arabic text."}
+                <div className="rounded-xl border border-gold/20 bg-gold/5 p-3 text-[13px] text-parchment-muted">
+                  {L({
+                    en: "A soft golden halo is added around the Arabic text.",
+                    fr: "Un halo doré est ajouté autour du texte arabe.",
+                    ar: "يُضاف هالة ذهبية حول الخط العربي.",
+                  })}
                 </div>
               )}
 
-              {/* More visual toggles */}
-              <Field label={ar ? "إعدادات إضافية" : "More Options"}>
-                <div className="space-y-2">
-                  {(
-                    [
-                      {
-                        key: "showSurahName",
-                        label: ar ? "شارة السورة" : "Surah Name Badge",
-                        emoji: "📖",
-                      },
-                      {
-                        key: "showVerseNumber",
-                        label: ar ? "رقم الآية" : "Verse Number",
-                        emoji: "🔢",
-                      },
-                    ] as const
-                  ).map(({ key, label, emoji }) => (
-                    <SwitchRow
-                      key={key}
-                      label={`${emoji} ${label}`}
-                      value={!!settings[key]}
-                      onToggle={() => toggle(key)}
-                    />
-                  ))}
-                </div>
-              </Field>
-
-              {/* Fun tips */}
-              <div className="rounded-lg border border-gold/10 bg-ink-light/20 p-4 space-y-2">
-                <p className="text-xs font-semibold text-gold/60 uppercase tracking-wider">
-                  {ar ? "نصائح" : "Tips"}
+              {/* Tips */}
+              <div className="space-y-2 rounded-xl border border-gold/15 bg-ink-soft/40 p-4">
+                <p className="text-[13px] font-semibold uppercase tracking-wider text-gold/70">
+                  {L({ en: "Tips", fr: "Conseils", ar: "نصائح" })}
                 </p>
                 {[
-                  ar
-                    ? "توهج + ظل = تأثير إسلامي كلاسيكي"
-                    : "Glow + Shadow = classic Islamic aesthetic",
-                  ar
-                    ? "إيقاف التظليل مع خلفية داكنة = نظيف ومبهر"
-                    : "No overlay + dark gradient bg = clean & striking",
-                  ar
-                    ? "إطار الأقواس يناسب منصة يوتيوب"
-                    : "Arch frame works great for YouTube Shorts",
+                  L({
+                    en: "Glow + Shadow = classic Islamic aesthetic",
+                    fr: "Halo + ombre = esthétique islamique classique",
+                    ar: "توهج + ظل = تأثير إسلامي كلاسيكي",
+                  }),
+                  L({
+                    en: "Low darkness + bright footage = clean & striking",
+                    fr: "Voile léger + footage lumineux = net et frappant",
+                    ar: "تعتيم خفيف مع فيديو مشرق = نظيف ومبهر",
+                  }),
+                  L({
+                    en: "Arch frame works great for YouTube Shorts",
+                    fr: "Le cadre en arche convient bien aux YouTube Shorts",
+                    ar: "إطار الأقواس يناسب منصة يوتيوب",
+                  }),
                 ].map((tip, i) => (
                   <p
                     key={i}
-                    className="text-[11px] text-parchment-muted/50 flex items-start gap-1.5"
+                    className="flex items-start gap-2 text-[13px] text-parchment-muted"
                   >
-                    <span className="text-gold/30 mt-px">◆</span> {tip}
+                    <span
+                      className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-gold/50"
+                      aria-hidden="true"
+                    />
+                    {tip}
                   </p>
                 ))}
               </div>
@@ -1396,45 +1279,37 @@ export function StepSettings({
 
       {/* ══ Navigation ══════════════════════════════════════════ */}
       {canProceed && (
-        <p className="text-center text-xs text-gold/50 animate-fade-up">
-          {ar
-            ? "🎉 كل شيء جاهز — لنبدع!"
-            : "🎉 All set — let's create something beautiful!"}
+        <p className="animate-step-in text-center text-[13px] text-gold/70">
+          {L({
+            en: "All set — let's create something beautiful!",
+            fr: "Tout est prêt — créons quelque chose de magnifique !",
+            ar: "كل شيء جاهز — لنبدع!",
+          })}
         </p>
       )}
 
-      <div className="flex justify-center gap-4 flex-wrap">
-        <button
-          onClick={onBack}
-          className="rounded-full border border-parchment/20 px-6 py-3 text-sm text-parchment hover:border-gold/40 hover:text-gold flex items-center gap-2 transition active:scale-95"
-        >
-          <IslamicStarIcon className="h-3 w-3 rotate-180" />
-          {ar ? "رجوع" : "Back"}
+      <div className="flex flex-wrap justify-center gap-4">
+        <button onClick={onBack} className="btn-ghost px-6 py-3 text-sm">
+          <ArrowIcon className="h-4 w-4 rotate-180" />
+          {L({ en: "Back", fr: "Retour", ar: "رجوع" })}
         </button>
 
         <button
           onClick={onNext}
           disabled={!canProceed}
-          className="group relative overflow-hidden rounded-full bg-gold px-8 py-3.5 text-sm font-semibold text-ink hover:-translate-y-0.5 hover:shadow-xl hover:shadow-gold/20 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all duration-200 flex items-center gap-2 active:scale-95"
+          className="btn-primary px-8 py-3.5 text-sm"
         >
-          <span className="absolute inset-0 -translate-x-full bg-parchment/30 transition-transform duration-700 group-hover:translate-x-full" />
-          <span className="relative flex items-center gap-2">
-            {ar ? "معاينة وإنتاج" : "Preview & Generate"}
-            <IslamicStarIcon className="h-4 w-4 transition-transform group-hover:rotate-45" />
-          </span>
+          {L({ en: "Preview & Generate", fr: "Aperçu & génération", ar: "معاينة وإنتاج" })}
+          <ArrowIcon className="h-4 w-4 rtl:rotate-180" />
         </button>
       </div>
 
       {/* Hint when partially filled */}
       {!canProceed && (platformChosen || selectedReciter) && (
-        <p className="text-center text-xs text-parchment-muted/40">
+        <p className="text-center text-[13px] text-parchment-muted/40">
           {!platformChosen
-            ? ar
-              ? "اختر منصة أولاً"
-              : "Choose a platform first"
-            : ar
-              ? "اختر قارئاً للمتابعة"
-              : "Select a reciter to continue"}
+            ? L({ en: "Choose a platform first", fr: "Choisissez d'abord une plateforme", ar: "اختر منصة أولا" })
+            : L({ en: "Select a reciter to continue", fr: "Choisissez un récitant pour continuer", ar: "اختر قارئا للمتابعة" })}
         </p>
       )}
     </div>
@@ -1453,9 +1328,9 @@ function SectionHead({
   label: string;
 }) {
   return (
-    <div className="flex items-center gap-2 mb-1">
+    <div className="mb-1 flex items-center gap-2">
       {icon}
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gold/20 text-gold text-[9px] font-bold">
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-gold/20 text-xs font-bold text-gold">
         {step}
       </span>
       <h3 className="text-sm uppercase tracking-wider text-gold/60">{label}</h3>
@@ -1472,7 +1347,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="text-xs text-parchment-muted mb-2 block uppercase tracking-wider">
+      <label className="mb-2 block text-[13px] uppercase tracking-wider text-parchment-muted">
         {label}
       </label>
       {children}
@@ -1492,10 +1367,10 @@ function ToggleBtn({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 rounded-lg border py-2.5 px-2 text-xs transition-all text-center hover:-translate-y-0.5 active:scale-95 ${
+      className={`flex-1 rounded-lg border px-2 py-2.5 text-center text-[13px] transition-all hover:-translate-y-0.5 active:scale-95 ${
         active
-          ? "border-gold/40 bg-gold/15 text-gold ring-1 ring-gold/25 shadow-sm shadow-gold/10"
-          : "border-gold/10 text-parchment-muted hover:border-gold/25 hover:bg-ink-light/30"
+          ? "border-gold/40 bg-gold/15 text-gold shadow-sm shadow-gold/10 ring-1 ring-gold/25"
+          : "border-gold/10 text-parchment-muted hover:border-gold/25 hover:bg-ink-soft/30"
       }`}
     >
       {children}
@@ -1514,89 +1389,20 @@ function SwitchRow({
 }) {
   return (
     <label
-      className="flex items-center gap-3 cursor-pointer group"
+      className="group flex cursor-pointer items-center gap-3"
       onClick={onToggle}
     >
       <div className={`toggle-track${value ? " on" : ""}`}>
         <div className="toggle-thumb" />
       </div>
-      <span className="text-sm text-parchment-muted group-hover:text-parchment transition-colors">
+      <span className="text-sm text-parchment-muted transition-colors group-hover:text-parchment">
         {label}
       </span>
     </label>
   );
 }
 
-/* ── Duration Badge (reads video metadata) ──────────────────── */
-
-/* ── Simple playlist totals — "3 videos · 1:25 / 1:40 needed  [Clear all]" ── */
-function PlaylistTotals({
-  urls,
-  totalSec,
-  ar,
-  locale,
-  onClearAll,
-}: {
-  urls: string[];
-  totalSec: number | null;
-  ar: boolean;
-  locale: string;
-  onClearAll: () => void;
-}) {
-  // Sum known durations synchronously every render — no effects, no
-  // promises, no stale state. Unknown durations warm the cache once via
-  // metadata read, then a re-render shows the full value.
-  let sumSec = 0;
-  for (const u of urls) sumSec += getCachedVideoDuration(u) ?? 0;
-  useEffect(() => {
-    urls.forEach((u) => {
-      if (getCachedVideoDuration(u) === null) fetchVideoDuration(u);
-    });
-  }, [urls.join("|")]);
-
-  if (!urls.length) return null;
-
-  const mm = (n: number) =>
-    `${Math.floor(n / 60)}:${String(Math.round(n) % 60).padStart(2, "0")}`;
-  const enough = totalSec !== null && sumSec >= totalSec;
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1 text-[11px] text-parchment-muted/80">
-      <span>
-        {urls.length}{" "}
-        {ar
-          ? urls.length > 2 ? "فيديوهات" : "فيديو"
-          : locale === "fr"
-            ? urls.length > 1 ? "vidéos" : "vidéo"
-            : urls.length === 1 ? "video" : "videos"}
-        {" · "}
-        {mm(sumSec)}
-        {totalSec !== null && (
-          <>
-            <span className="text-gold/70"> / </span>
-            {mm(totalSec)} {ar ? "مطلوب" : locale === "fr" ? "requis" : "needed"}
-            <span className={enough ? "text-verdant" : "text-gold"}>
-              {enough
-                ? " ✓"
-                : ` (+${mm(totalSec - sumSec)} ${ar ? "ناقص" : locale === "fr" ? "manquant" : "short"})`}
-            </span>
-          </>
-        )}
-      </span>
-      <button
-        type="button"
-        onClick={onClearAll}
-        className="inline-flex items-center gap-1 text-red-400/90 transition hover:text-red-300"
-      >
-        <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-        {ar ? "مسح الكل" : locale === "fr" ? "Tout effacer" : "Clear all"}
-      </button>
-    </div>
-  );
-}
-
+/* ══ Supabase Library (disabled — restore by uncommenting) ══════
 function DurationBadge({ videoRef }: { videoRef: string }) {
   const [duration, setDuration] = useState<number | null>(
     () => getCachedVideoDuration(videoRef),
@@ -1620,248 +1426,9 @@ function DurationBadge({ videoRef }: { videoRef: string }) {
   const label = `${mins}:${secs.toString().padStart(2, "0")}`;
 
   return (
-    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
+    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-xs font-medium text-parchment/90 pointer-events-none">
       {label}
     </span>
   );
 }
-
-/* ── Pexels Video Search ───────────────────────────────────── */
-
-const PEXELS_CATEGORIES = [
-  "nature",
-  "ocean",
-  "mountains",
-  "forest",
-  "sunset",
-  "city",
-  "space",
-  "rain",
-  "snow",
-  "desert",
-  "flowers",
-  "waterfall",
-  "clouds",
-  "stars",
-  "mosque",
-];
-
-function PexelsSearch({
-  ar,
-  selected,
-  onSelect,
-  onRemove,
-  onClear,
-  totalSec,
-  durationLoading,
-  locale,
-}: {
-  ar: boolean;
-  selected: string[];
-  onSelect: (url: string) => void;
-  onRemove: (url: string) => void;
-  onClear: () => void;
-  totalSec: number | null;
-  durationLoading: boolean;
-  locale: string;
-}) {
-  const [query, setQuery] = useState("nature");
-  const [results, setResults] = useState<PexelsVideo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  const doSearch = useCallback(
-    async (q: string, p: number, append: boolean) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await searchPexelsVideos(q, p);
-        setResults((prev) => {
-          const base = append ? prev : [];
-          const seen = new Set(base.map((v) => v.id));
-                  return [
-            ...base,
-            ...data.videos.filter((v) => {
-              if (seen.has(v.id)) return false;
-              seen.add(v.id);
-              return true;
-            }),
-          ];
-        });
-        setHasMore(!!data.nextPage && data.videos.length > 0);
-      } catch (err: any) {
-        setError(err?.message ?? "Search failed");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const t = setTimeout(() => doSearch(query, 1, false), 400);
-    return () => clearTimeout(t);
-  }, [query, doSearch]);
-
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || loading) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          const next = page + 1;
-          setPage(next);
-          doSearch(query, next, true);
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [hasMore, loading, page, query, doSearch]);
-
-  return (
-    <div className="space-y-3 rounded-lg border border-gold/10 bg-ink-light/20 p-4">
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-xs text-parchment-muted uppercase tracking-wider">
-          {ar ? "بحث فيديوهات بكسلز" : "Pexels Video Search"}
-        </p>
-        <a
-          href="https://www.pexels.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[9px] text-parchment-muted/40 hover:text-gold/60 transition"
-        >
-          {ar ? "صور من بكسلز" : "Videos by Pexels"}
-        </a>
-      </div>
-
-      <div className="relative">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setPage(1);
-          }}
-          placeholder={
-            ar
-              ? "ابحث: طبيعة، محيط، جبال..."
-              : "Search: nature, ocean, mountains..."
-          }
-          className="w-full rounded-lg border border-gold/20 bg-ink-light/40 px-3 py-2.5 pl-9 text-sm text-parchment placeholder-parchment-muted/40 outline-none focus:border-gold/40 focus:ring-1 focus:ring-gold/20 transition"
-        />
-        <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gold/30"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
-          />
-        </svg>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {PEXELS_CATEGORIES.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => {
-              setQuery(cat);
-              setPage(1);
-            }}
-            className={`rounded-full border px-2.5 py-1 text-[10px] capitalize transition-all ${
-              query === cat
-                ? "border-gold/40 bg-gold/15 text-gold"
-                : "border-gold/10 text-parchment-muted/60 hover:border-gold/25 hover:text-parchment"
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      {loading && results.length === 0 ? (
-        <div className="flex justify-center py-6">
-          <Spinner className="h-5 w-5 text-gold" />
-        </div>
-      ) : error ? (
-        <p className="text-xs text-red-400 py-3 text-center">{error}</p>
-      ) : results.length === 0 ? (
-        <p className="text-xs text-parchment-muted/40 py-4 text-center">
-          {ar ? "لا توجد نتائج" : "No results found"}
-        </p>
-      ) : (
-        <>
-          <div className="max-h-64 overflow-y-auto custom-scrollbar">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {results.map((v) => {
-                const idx = selected.indexOf(v.videoUrl);
-                const isSel = idx !== -1;
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() =>
-                      isSel ? onRemove(v.videoUrl) : onSelect(v.videoUrl)
-                    }
-                    className={`relative rounded-md overflow-hidden border-2 transition-all aspect-video bg-ink-light group ${
-                      isSel
-                        ? "border-gold ring-2 ring-gold/30"
-                        : "border-gold/10 hover:border-gold/30"
-                    }`}
-                  >
-                    <img
-                      src={v.image}
-                      alt={v.photographer}
-                      loading="lazy"
-                      className="w-full h-full object-cover"
-                    />
-                    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-medium text-parchment/90 pointer-events-none">
-                      {Math.floor(v.duration / 60)}:
-                      {(v.duration % 60).toString().padStart(2, "0")}
-                    </span>
-                    <span className="absolute top-1.5 left-1.5 rounded bg-gold/20 backdrop-blur-sm px-1.5 py-0.5 text-[8px] font-medium text-gold pointer-events-none">
-                      {v.width}×{v.height}
-                    </span>
-                    {isSel && (
-                      <>
-                        <div className="absolute inset-0 bg-gold/10" />
-                        <span className="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[10px] font-bold text-ink shadow">
-                          {idx + 1}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-            {hasMore && (
-              <div ref={sentinelRef} className="flex justify-center py-4">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-gold/20 border-t-gold" />
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-
-
-      {selected.length > 0 && (
-        <PlaylistTotals
-          urls={selected}
-          totalSec={totalSec}
-          ar={ar}
-          locale={locale}
-          onClearAll={onClear}
-        />
-      )}
-    </div>
-  );
-}
+══════════════════════════════════════════════════════════════ */

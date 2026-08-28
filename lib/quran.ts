@@ -36,58 +36,10 @@ export interface Reciter {
   source: "alquran" | "quranapi";
 }
 
-export const PLATFORMS = [
-  {
-    id: "youtube",
-    label: "YouTube Shorts",
-    icon: "yt",
-    aspect: "9:16",
-    fontSize: "medium",
-  },
-  {
-    id: "instagram",
-    label: "Instagram Reel",
-    icon: "ig",
-    aspect: "9:16",
-    fontSize: "large",
-  },
-  {
-    id: "facebook",
-    label: "Facebook",
-    icon: "fb",
-    aspect: "1:1",
-    fontSize: "medium",
-  },
-  {
-    id: "tiktok",
-    label: "TikTok",
-    icon: "tt",
-    aspect: "9:16",
-    fontSize: "large",
-  },
-];
-
 export const TEXT_POSITIONS = [
   { id: "top", label: "Top" },
   { id: "center", label: "Center" },
   { id: "bottom", label: "Bottom" },
-];
-
-export const TEXT_COLORS = [
-  { id: "gold", label: "Gold", value: "#d4af37" },
-  { id: "parchment", label: "Parchment", value: "#f5f0e8" },
-  { id: "white", label: "White", value: "#ffffff" },
-  { id: "cream", label: "Cream", value: "#faf5eb" },
-  { id: "amber", label: "Amber", value: "#ffbf00" },
-  { id: "light-gold", label: "Lt. Gold", value: "#e5c76b" },
-  { id: "emerald", label: "Emerald", value: "#50c878" },
-  { id: "silver", label: "Silver", value: "#c0c0c0" },
-  { id: "rose", label: "Rose Gold", value: "#e0bfb8" },
-  { id: "ivory", label: "Ivory", value: "#fffff0" },
-];
-
-export const ANIMATED_BG = [
-  { id: "upload", label: "Upload Video", icon: "📁" },
 ];
 
 export const VERSE_PRESETS = [
@@ -152,7 +104,9 @@ const TRANSLATION_IDS: Record<string, number> = {
   ar: 0, // No translation for Arabic
 };
 
-async function fetchJson<T>(url: string): Promise<T> {
+const FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const cacheKey = `midhkar:${url}`;
   try {
     const cached = sessionStorage.getItem(cacheKey);
@@ -161,15 +115,27 @@ async function fetchJson<T>(url: string): Promise<T> {
     /* sessionStorage unavailable */
   }
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  try {
-    sessionStorage.setItem(cacheKey, JSON.stringify(data));
-  } catch {
-    /* quota exceeded — don't block */
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      const res = await fetch(url, {
+        signal: signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      } catch {
+        /* quota exceeded — don't block */
+      }
+      return data;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      lastErr = err;
+    }
   }
-  return data;
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /* ── Surahs ──────────────────────────────────────────────────────── */
@@ -182,7 +148,12 @@ export async function fetchSurahs(): Promise<Surah[]> {
     englishName: c.name_simple,
     englishNameTranslation: c.translated_name?.name || "",
     numberOfAyahs: c.verses_count,
-    revelationType: c.revelation_place,
+    // API returns lowercase "makkah" / "madinah"; normalize to the labels
+    // the UI filters and badges on.
+    revelationType:
+      String(c.revelation_place).toLowerCase() === "madinah"
+        ? "Medinan"
+        : "Meccan",
   }));
 }
 
@@ -227,45 +198,76 @@ export async function fetchReciters(): Promise<Reciter[]> {
   return results;
 }
 
-/* ── Ayahs (Uthmani text) ───────────────────────────────────────── */
-export async function fetchAyahs(surahNumber: number): Promise<Ayah[]> {
+/* ── Ayahs (Uthmani text) + translation in ONE request ─────────── */
+export async function fetchAyahs(
+  surahNumber: number,
+  lang: string = "ar",
+  signal?: AbortSignal,
+): Promise<Ayah[]> {
+  const transId = TRANSLATION_IDS[lang] || 0;
+  const transParam = transId ? `&translations=${transId}` : "";
   const data = await fetchJson<any>(
-    `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&fields=text_uthmani,juz_number,page_number,sajdah_number&page=1&per_page=300`,
+    `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&fields=text_uthmani,juz_number,page_number,sajdah_number${transParam}&page=1&per_page=300`,
+    signal,
   );
   const verses = data.verses || [];
-  return verses.map((v: any) => ({
-    number: v.id,
-    numberInSurah: v.verse_number,
-    text: v.text_uthmani || "",
-    juz: v.juz_number || 1,
-    page: v.page_number || 1,
-    sajda: !!v.sajdah_number,
-  }));
+  return verses.map((v: any) => {
+    let translation = "";
+    if (transId) {
+      const raw =
+        v.translations?.[0]?.text ||
+        v.translations?.find((t: any) => t.resource_id === transId)?.text ||
+        "";
+      translation = raw.replace(/<[^>]+>/g, "");
+    }
+    return {
+      number: v.id,
+      numberInSurah: v.verse_number,
+      text: v.text_uthmani || "",
+      translation,
+      juz: v.juz_number || 1,
+      page: v.page_number || 1,
+      sajda: !!v.sajdah_number,
+    };
+  });
 }
 
-/* ── Translations ───────────────────────────────────────────────── */
-export async function fetchTranslation(
-  surahNumber: number,
-  lang: string,
-): Promise<Map<number, string>> {
-  const transId = TRANSLATION_IDS[lang];
-  if (!transId) return new Map();
+/* ── Single verse by key (used by the living hero preview) ────── */
+export interface VerseByKey {
+  surah: number;
+  ayah: number;
+  text: string;
+  translation: string;
+}
 
-  const data = await fetchJson<any>(
-    `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&translations=${transId}&fields=verse_number&page=1&per_page=300`,
-  );
-  const verses = data.verses || [];
-  const map = new Map<number, string>();
-  for (const v of verses) {
-    const text =
+export async function fetchVerseByKey(
+  surah: number,
+  ayah: number,
+  lang: string,
+  signal?: AbortSignal,
+): Promise<VerseByKey | null> {
+  const transId = TRANSLATION_IDS[lang] || 0;
+  const transParam = transId ? `&translations=${transId}` : "";
+  try {
+    const data = await fetchJson<any>(
+      `${API_BASE}/verses/by_key/${surah}:${ayah}?language=en&words=false&fields=text_uthmani${transParam}`,
+      signal,
+    );
+    const v = data.verse;
+    if (!v) return null;
+    const rawTrans =
       v.translations?.[0]?.text ||
       v.translations?.find((t: any) => t.resource_id === transId)?.text ||
       "";
-    // Strip HTML tags from translation text
-    const clean = text.replace(/<[^>]+>/g, "");
-    if (clean) map.set(v.verse_number, clean);
+    return {
+      surah,
+      ayah,
+      text: v.text_uthmani || "",
+      translation: rawTrans.replace(/<[^>]+>/g, ""),
+    };
+  } catch {
+    return null;
   }
-  return map;
 }
 
 /* ── Per-ayah audio URLs ────────────────────────────────────────── */

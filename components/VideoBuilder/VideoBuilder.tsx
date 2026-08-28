@@ -1,36 +1,39 @@
 "use client";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { m, AnimatePresence } from "motion/react";
+import { EASE_OUT } from "@/components/MotionProvider";
 import { useI18n } from "@/lib/i18n";
 import {
   fetchSurahs,
   fetchReciters,
   fetchAyahs,
-  fetchTranslation,
   getQuranApiAudioUrl,
   getEveryayahAudioUrl,
 } from "@/lib/quran";
+/* ── Supabase Library (disabled — restore by uncommenting) ──────
 import { fetchStorageVideos } from "@/lib/storage-client";
-import type { Surah, Ayah, Reciter } from "@/lib/quran";
 import type { StorageVideo } from "@/lib/storage-client";
+──────────────────────────────────────────────────────────────── */
+import type { Surah, Ayah, Reciter } from "@/lib/quran";
 import {
   DEFAULT_SETTINGS,
   GenLog,
   VideoSettings,
   PLATFORM_META,
-  saveDraft,
-  loadDraft,
-  clearDraft,
 } from "@/lib/types";
-import type { PlatformId, Draft } from "@/lib/types";
+import type { PlatformId, Platform } from "@/lib/types";
 import {
   generateVideo,
   prefetchAudio,
   clearAudioCache,
   estimateTotalDurationSec,
 } from "@/lib/generate-video";
-import { CrescentMoonIcon, IslamicStarIcon } from "./icons";
+import { GardenMark, Bloom } from "@/components/Ornament/ornaments";
+import { StudioBackdrop } from "./studio-backdrop";
+import { CheckIcon } from "./icons";
 import { StepSurah } from "./StepSurah";
 import { StepVerses } from "./StepVerses";
+import { LivePreview } from "./LivePreview";
 import dynamic from "next/dynamic";
 
 const StepGenerate = dynamic(() =>
@@ -42,80 +45,90 @@ const StepSettings = dynamic(() =>
   { ssr: false },
 );
 
-function buildPlatform(id: PlatformId) {
+function buildPlatform(id: PlatformId): Platform {
   const meta = PLATFORM_META[id];
   return {
     id,
     label: meta.label,
     aspect: meta.aspect,
-    fontSize: "medium" as const,
-    icon: meta.icon,
   };
 }
 const FALLBACK_PLATFORM = buildPlatform("youtube");
 
-function StepIndicator({ step, locale }: { step: number; locale: string }) {
+function StepIndicator({
+  step,
+  locale,
+  onNavigate,
+}: {
+  step: number;
+  locale: string;
+  onNavigate: (n: 1 | 2 | 3 | 4) => void;
+}) {
   const steps = [
-    { num: 1, label: locale === "ar" ? "السورة" : "Surah" },
-    { num: 2, label: locale === "ar" ? "الآيات" : "Verses" },
-    { num: 3, label: locale === "ar" ? "الإعدادات" : "Settings" },
-    { num: 4, label: locale === "ar" ? "الإنتاج" : "Generate" },
+    { num: 1 as const, en: "Surah", fr: "Sourate", ar: "السورة" },
+    { num: 2 as const, en: "Verses", fr: "Versets", ar: "الآيات" },
+    { num: 3 as const, en: "Settings", fr: "Réglages", ar: "الإعدادات" },
+    { num: 4 as const, en: "Generate", fr: "Générer", ar: "الإنتاج" },
   ];
+  const label = (s: { en: string; fr: string; ar: string }) =>
+    locale === "ar" ? s.ar : locale === "fr" ? s.fr : s.en;
+
   return (
     <nav
-      className="glass mx-auto mb-12 flex w-fit items-center justify-center gap-1.5 rounded-full px-3 py-2.5 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5)] sm:gap-2 sm:px-5"
+      className="mx-auto mb-12 flex w-fit items-center justify-center"
       aria-label="Progress"
     >
       {steps.map((s, i) => {
         const active = step === s.num;
         const done = step > s.num;
+        const clickable = done;
         return (
-          <div key={s.num} className="flex items-center gap-1.5 sm:gap-2">
-            <div className="flex items-center gap-2">
-              <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full border text-[11px] font-semibold transition-all duration-500 ${
-                  done
-                    ? "border-gold/50 bg-gold text-ink shadow-md shadow-gold/30"
-                    : active
-                      ? "border-gold/50 bg-gold/15 text-gold shadow-[0_0_16px_rgba(212,175,55,0.25)]"
-                      : "border-gold/10 bg-ink-light/30 text-parchment-muted/60"
-                }`}
+          <div key={s.num} className="flex items-center">
+            <div className="relative flex flex-col items-center gap-2 px-1 sm:px-2">
+              <button
+                type="button"
+                onClick={() => clickable && onNavigate(s.num)}
+                disabled={!clickable && !active}
                 aria-current={active ? "step" : undefined}
+                aria-label={`${label(s)} — ${done ? "completed" : active ? "current" : "upcoming"}`}
+                className={`relative flex h-10 w-10 items-center justify-center rounded-full border text-[13px] font-semibold transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/60 ${
+                  done
+                    ? "cursor-pointer border-gold/60 bg-gold text-ink lit-soft hover:scale-105"
+                    : active
+                      ? "border-gold/70 bg-gold/15 text-gold"
+                      : "cursor-default border-gold/15 bg-ink-light/60 text-parchment-dim"
+                }`}
               >
-                {done ? (
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+                {active && (
+                  <m.span
+                    layoutId="station-bead"
+                    className="absolute -inset-2"
+                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                    aria-hidden="true"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2.5}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                ) : (
-                  s.num
+                    <Bloom className="h-full w-full animate-spin-slow" petals={8} />
+                  </m.span>
                 )}
-              </div>
+                <span className="relative">
+                  {done ? <CheckIcon className="h-4 w-4" /> : s.num}
+                </span>
+              </button>
               <span
-                className={`hidden text-[11px] font-medium transition-colors sm:block ${
+                className={`text-[13px] font-medium transition-colors ${
                   active
                     ? "text-gold"
                     : done
-                      ? "text-gold-soft/70"
-                      : "text-parchment-muted/50"
+                      ? "text-gold-soft/80"
+                      : "text-parchment-dim"
                 }`}
               >
-                {s.label}
+                {label(s)}
               </span>
             </div>
             {i < steps.length - 1 && (
-              <div className="relative mx-1 h-px w-6 overflow-hidden bg-gold/10 sm:w-10">
+              <div className="relative mx-1 mb-6 h-px w-8 overflow-hidden bg-verdant/20 sm:w-14">
                 <div
-                  className="h-full bg-gradient-to-r from-gold/60 to-gold/20 transition-all duration-700"
+                  className="h-full bg-gradient-to-r from-verdant/80 to-gold/60 transition-all duration-700"
                   style={{ width: done ? "100%" : "0%" }}
                 />
               </div>
@@ -130,6 +143,17 @@ function StepIndicator({ step, locale }: { step: number; locale: string }) {
 export function VideoBuilder() {
   const { locale } = useI18n();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [stepDir, setStepDir] = useState(1);
+
+  const goTo = useCallback(
+    (next: 1 | 2 | 3 | 4) => {
+      setStepDir((prev) => {
+        return next > step ? 1 : next < step ? -1 : prev;
+      });
+      setStep(next);
+    },
+    [step],
+  );
 
   const [surahs, setSurahs] = useState<Surah[]>([]);
   const [surahsLoading, setSurahsLoading] = useState(true);
@@ -140,8 +164,10 @@ export function VideoBuilder() {
   const [ayahsLoading, setAyahsLoading] = useState(false);
   const [selectedNums, setSelectedNums] = useState<Set<number>>(new Set());
   const [selectedReciter, setSelectedReciter] = useState<Reciter | null>(null);
+  /* ── Supabase Library (disabled — restore by uncommenting) ──────
   const [videos, setVideos] = useState<StorageVideo[]>([]);
   const [videosLoading, setVideosLoading] = useState(false);
+  ──────────────────────────────────────────────────────────────── */
 
   // ← CHANGED: added verseSpacing: 0 and transitionStyle: "none" so the
   // default experience is seamless back-to-back verses with no fade delays.
@@ -157,6 +183,14 @@ export function VideoBuilder() {
   const [resultVideoUrl, setResultVideoUrl] = useState<string | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const logIdRef = useRef(0);
+  const stamp = useCallback(
+    (log: { msg: string; pct: number }): GenLog => ({
+      ...log,
+      id: ++logIdRef.current,
+    }),
+    [],
+  );
   const bgVideoRef = useRef<HTMLVideoElement>(null);
   // Tracks which src we've already told bgVideoRef to load, so the eager
   // preload effect below doesn't call .load() repeatedly on every render.
@@ -212,28 +246,22 @@ export function VideoBuilder() {
       return;
     }
     setAyahsLoading(true);
+    const ctrl = new AbortController();
     const { number: num } = selectedSurah;
-    const lang = settings.translationLang;
-    fetchAyahs(num)
-      .then((base) => {
-        setAyahs(base);
-        if (lang !== "ar") {
-          fetchTranslation(num, lang)
-            .then((map) =>
-              setAyahs((prev) =>
-                prev.map((a) => ({
-                  ...a,
-                  translation: map.get(a.numberInSurah) || "",
-                })),
-              ),
-            )
-            .catch(console.error);
-        }
+    fetchAyahs(num, settings.translationLang, ctrl.signal)
+      .then((list) => {
+        if (!ctrl.signal.aborted) setAyahs(list);
       })
-      .catch(console.error)
-      .finally(() => setAyahsLoading(false));
+      .catch((err) => {
+        if (!ctrl.signal.aborted) console.error(err);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setAyahsLoading(false);
+      });
+    return () => ctrl.abort();
   }, [selectedSurah, settings.translationLang]);
 
+  /* ── Supabase Library (disabled — restore by uncommenting) ──────
   useEffect(() => {
     setVideosLoading(true);
     fetchStorageVideos()
@@ -241,6 +269,7 @@ export function VideoBuilder() {
       .catch(() => setVideos([]))
       .finally(() => setVideosLoading(false));
   }, []);
+  ──────────────────────────────────────────────────────────────── */
 
   const stopAudio = useCallback(() => {
     if (audioRef.current) {
@@ -263,10 +292,12 @@ export function VideoBuilder() {
   const handleToggleVerse = useCallback((num: number) => {
     setSelectedNums((prev) => {
       const n = new Set(prev);
-      n.has(num) ? n.delete(num) : n.add(num);
+      if (n.has(num)) n.delete(num);
+      else n.add(num);
       return n;
     });
   }, []);
+
   const handleChangeSetting = useCallback(
     <K extends keyof VideoSettings>(k: K, v: VideoSettings[K]) => {
       setSettings((s) => ({ ...s, [k]: v }));
@@ -453,7 +484,7 @@ export function VideoBuilder() {
     if (!selectedSurah || !selectedReciter || selectedAyahsData.length === 0)
       return;
     setIsGenerating(true);
-    setGenLogs([{ msg: "Starting…", pct: 0 }]);
+    setGenLogs([stamp({ msg: "Starting…", pct: 0 })]);
     setResultVideoUrl(null);
 
     const ctrl = new AbortController();
@@ -467,25 +498,28 @@ export function VideoBuilder() {
         settings,
         platform: selectedPlatform,
         onLog: (log) => {
-          setGenLogs((prev) => [...prev.slice(-4), log]);
+          setGenLogs((prev) => [...prev.slice(-4), stamp(log)]);
         },
         signal: ctrl.signal,
       });
       if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
+        // Defer: the result <video> may still hold this src until React
+        // re-renders; revoking synchronously logs ERR_FILE_NOT_FOUND.
+        const stale = objectUrlRef.current;
+        setTimeout(() => URL.revokeObjectURL(stale), 1000);
       }
       const url = URL.createObjectURL(blob);
       objectUrlRef.current = url;
       setResultVideoUrl(url);
-      setGenLogs((prev) => [...prev, { msg: "✅ Done!", pct: 100 }]);
+      setGenLogs((prev) => [...prev, stamp({ msg: "✅ Done!", pct: 100 })]);
     } catch (err: any) {
       if (err?.name === "AbortError") {
-        setGenLogs((prev) => [...prev, { msg: "Cancelled.", pct: 0 }]);
+        setGenLogs((prev) => [...prev, stamp({ msg: "Cancelled.", pct: 0 })]);
       } else {
         console.error("[VideoBuilder] generation error:", err);
         setGenLogs((prev) => [
           ...prev,
-          { msg: `❌ Error: ${err?.message ?? String(err)}`, pct: 0 },
+          stamp({ msg: `❌ Error: ${err?.message ?? String(err)}`, pct: 0 }),
         ]);
       }
     } finally {
@@ -498,6 +532,7 @@ export function VideoBuilder() {
     selectedAyahsData,
     settings,
     selectedPlatform,
+    stamp,
   ]);
 
   // Bug 7: Revoke URL on unmount
@@ -510,17 +545,24 @@ export function VideoBuilder() {
     };
   }, []);
 
-  // Opt 8: Start prefetching audio as soon as reciter + surah + verses are ready
+  // Prefetch audio as soon as reciter + surah + verses are ready. The
+  // decoded-audio cache is LRU-capped and survives verse toggles — wiping
+  // it here (as before) re-downloaded the whole selection on every toggle.
   useEffect(() => {
     if (selectedReciter && selectedSurah && selectedAyahsData.length > 0) {
       prefetchAudio(selectedAyahsData, selectedReciter, selectedSurah).catch(
         console.error,
       );
     }
+  }, [selectedReciter, selectedSurah, selectedAyahsData]);
+
+  // Drop the cache only when the reciter or surah actually changes (or on
+  // unmount) — its keys include both, so old entries are never served.
+  useEffect(() => {
     return () => {
       clearAudioCache();
     };
-  }, [selectedReciter, selectedSurah, selectedAyahsData]);
+  }, [selectedReciter, selectedSurah]);
 
   // Accurate total video length: decode real audio durations for the selection.
   // Re-runs whenever verses/reciter/verse-spacing change; cancelled on change/unmount.
@@ -560,84 +602,15 @@ export function VideoBuilder() {
     settings.verseSpacing,
   ]);
 
-  /* ── Draft auto-save ──────────────────────────────────────── */
-  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [draftSaving, setDraftSaving] = useState(false);
-
+  /* ── Legacy cleanup: drafts/checkpoints were removed — wipe old keys ── */
   useEffect(() => {
-    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
-    if (resultVideoUrl) return; // don't save after generation
-    draftTimerRef.current = setTimeout(() => {
-      saveDraft({
-        step,
-        settings,
-        surahNumber: selectedSurah?.number ?? 0,
-        selectedNums: sortedNums,
-        reciterIdentifier: selectedReciter?.identifier ?? null,
-        reciterSource: selectedReciter?.source ?? null,
-        savedAt: Date.now(),
-      });
-      setDraftSaving(true);
-      setTimeout(() => setDraftSaving(false), 2000);
-    }, 500);
-    return () => {
-      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
-    };
-  }, [
-    step,
-    settings,
-    selectedSurah?.number,
-    sortedNums,
-    selectedReciter?.identifier,
-    selectedReciter?.source,
-    resultVideoUrl,
-  ]);
-
-  /* ── Restore draft on mount (after surahs + reciters loaded) ─ */
-  const [draftRestored, setDraftRestored] = useState(false);
-  const loadedRef = useRef(false);
-
-  useEffect(() => {
-    if (loadedRef.current) return;
-    if (surahsLoading || recitersLoading || !surahs.length || !reciters.length)
-      return;
-    loadedRef.current = true;
-
-    const draft = loadDraft();
-    if (!draft || !draft.surahNumber) return;
-
-    const sr = surahs.find((s) => s.number === draft.surahNumber);
-    if (!sr) return;
-
-    setSelectedSurah(sr);
-    setSelectedNums(new Set(draft.selectedNums));
-
-    // Guard: if the draft's platform no longer exists in PLATFORM_META
-    // (e.g. it changed shape since the draft was saved), clear it so the
-    // "required" prompt in StepSettings correctly reappears instead of
-    // silently falling back while the UI shows nothing selected.
-    const restoredSettings = { ...draft.settings };
-    if (
-      restoredSettings.platform &&
-      !PLATFORM_META[restoredSettings.platform as PlatformId]
-    ) {
-      restoredSettings.platform = "";
+    try {
+      localStorage.removeItem("midhkar-draft");
+      localStorage.removeItem("midhkar-checkpoint");
+    } catch {
+      /* storage unavailable */
     }
-    setSettings(restoredSettings);
-    setStep(draft.step);
-
-    if (draft.reciterIdentifier) {
-      const rc = reciters.find(
-        (r) =>
-          r.identifier === draft.reciterIdentifier &&
-          r.source === draft.reciterSource,
-      );
-      if (rc) setSelectedReciter(rc);
-    }
-
-    setDraftRestored(true);
-    setTimeout(() => setDraftRestored(false), 4000);
-  }, [surahsLoading, recitersLoading, surahs, reciters]);
+  }, []);
 
   const handleStartOver = useCallback(() => {
     setStep(1);
@@ -657,43 +630,19 @@ export function VideoBuilder() {
     setResultVideoUrl(null);
     setGenLogs([]);
     stopAudio();
-    clearDraft();
-    loadedRef.current = false;
     loadedBgSrcRef.current = null;
   }, [stopAudio]);
 
-  return (
-    <div className="relative min-h-screen overflow-hidden">
-      <div
-        className="absolute left-1/2 top-0 h-[500px] w-[700px] -translate-x-1/2 bg-gold/[0.025] blur-[100px]"
-        aria-hidden="true"
-      />
-      <div className="absolute inset-0 opacity-[0.02]" aria-hidden="true">
-        <svg className="h-full w-full">
-          <defs>
-            <pattern
-              id="bg-girih"
-              x="0"
-              y="0"
-              width="60"
-              height="60"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M30,0 L33,27 L60,30 L33,33 L30,60 L27,33 L0,30 L27,27 Z"
-                fill="none"
-                stroke="#d4af37"
-                strokeWidth="0.3"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#bg-girih)" />
-        </svg>
-      </div>
+  const showSidePreview =
+    step < 4 && !!selectedSurah && selectedAyahsData.length > 0;
 
-      {/* Hidden video element — used only for the live preview in
-          StepGenerate now. Preloaded eagerly (see effect above) as soon
-          as a background video is chosen, decoupled from generation. */}
+  return (
+    <div className="garden-ground relative min-h-screen overflow-hidden">
+      <StudioBackdrop step={step} />
+
+      {/* Hidden video element — used only for the live preview.
+          Preloaded eagerly (see effect above) as soon as a background
+          video is chosen, decoupled from generation. */}
       <video
         ref={bgVideoRef}
         className="hidden"
@@ -704,57 +653,56 @@ export function VideoBuilder() {
         crossOrigin="anonymous"
       />
 
-      <div className="relative z-10 mx-auto max-w-6xl px-6 py-24 sm:py-32">
-        <div className="text-center mb-10">
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <div className="h-px w-16 bg-gradient-to-r from-transparent to-gold/40" />
-            <div className="flex items-center gap-2">
-              <CrescentMoonIcon className="h-5 w-5 text-gold/30" />
-              <IslamicStarIcon className="h-5 w-5 text-gold/50" />
-              <CrescentMoonIcon className="h-5 w-5 text-gold/30" />
-            </div>
-            <div className="h-px w-16 bg-gradient-to-l from-transparent to-gold/40" />
+      <div className="relative z-10 mx-auto max-w-7xl px-6 py-16 sm:py-20">
+        <div className="mb-10 text-center">
+          <div className="mb-3 flex items-center justify-center gap-2 text-gold/70">
+            <GardenMark className="h-7 w-7" />
           </div>
-          <h1 className="text-shine text-shine-slow font-display text-4xl font-semibold tracking-tight sm:text-5xl">
-            {locale === "ar" ? "منشئ الفيديو القرآني" : "Quran Video Studio"}
+          <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            {locale === "ar" ? "استوديو الفيديو القرآني" : "Quran Video Studio"}
           </h1>
-          <p className="mt-3 text-parchment-muted max-w-md mx-auto text-sm">
-            {locale === "ar"
-              ? "اختر سورة وقارئاً واصنع فيديو قرآني احترافي مع الصوت الكامل"
-              : "Choose a surah and reciter — generate a professional Quran video with full synchronized audio"}
+          <p className="mx-auto mt-2 max-w-md text-sm text-parchment-muted">
+            {selectedSurah
+              ? locale === "ar"
+                ? `${selectedSurah.name} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
+                : `${selectedSurah.englishName} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
+              : locale === "ar"
+                ? "اختر سورة وقارئا واصنع فيديو قرآني احترافي مع الصوت الكامل"
+                : "Choose a surah and reciter — generate a professional Quran video with full synchronized audio"}
           </p>
         </div>
 
-        {/* Draft indicator */}
-        {(draftSaving || draftRestored) && (
-          <div className="flex justify-center mb-4">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-medium transition-all duration-300 ${draftRestored ? "bg-gold/15 text-gold border border-gold/20" : "bg-parchment/5 text-parchment-muted/60 border border-parchment/10"}`}
+        <StepIndicator step={step} locale={locale} onNavigate={goTo} />
+
+        <div
+          className={
+            showSidePreview
+              ? "grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_auto]"
+              : ""
+          }
+        >
+          <AnimatePresence mode="wait" initial={false} custom={stepDir}>
+            <m.div
+              key={step}
+              className="min-w-0"
+              custom={stepDir}
+              variants={{
+                enter: (dir: number) => ({ opacity: 0, x: dir >= 0 ? 44 : -44 }),
+                center: { opacity: 1, x: 0 },
+                exit: (dir: number) => ({ opacity: 0, x: dir >= 0 ? -26 : 26 }),
+              }}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.32, ease: EASE_OUT }}
             >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${draftRestored ? "bg-gold" : "bg-parchment/40"}`}
-              />
-              {draftRestored
-                ? locale === "ar"
-                  ? "تمت استعادة المسودة"
-                  : "Draft restored"
-                : locale === "ar"
-                  ? "جاري الحفظ..."
-                  : "Auto-saving..."}
-            </span>
-          </div>
-        )}
-
-        <StepIndicator step={step} locale={locale} />
-
-        <div key={step} className="step-enter-right">
         {step === 1 && (
           <StepSurah
             surahs={surahs}
             loading={surahsLoading}
             selected={selectedSurah}
             onSelect={handleSurahSelect}
-            onNext={() => setStep(2)}
+            onNext={() => goTo(2)}
             locale={locale}
           />
         )}
@@ -768,8 +716,8 @@ export function VideoBuilder() {
             showTranslation={settings.showTranslation}
             onToggle={handleToggleVerse}
             onPreset={handlePreset}
-            onBack={() => setStep(1)}
-            onNext={() => setStep(3)}
+            onBack={() => goTo(1)}
+            onNext={() => goTo(3)}
             locale={locale}
             surahNumber={selectedSurah.number}
             reciterIdentifier={selectedReciter?.identifier ?? null}
@@ -794,15 +742,16 @@ export function VideoBuilder() {
             canPreviewAudio={
               !!(selectedReciter && selectedSurah && sortedNums.length > 0)
             }
+            /* ── Supabase Library (disabled — restore by uncommenting) ──
             storageVideos={videos}
             videosLoading={videosLoading}
+            ──────────────────────────────────────────────────────────── */
             onFileUpload={handleFileUpload}
             uploadError={uploadError}
-            onBack={() => setStep(2)}
-            onNext={() => setStep(4)}
+            onBack={() => goTo(2)}
+            onNext={() => goTo(4)}
             locale={locale}
             totalDurationSec={totalDurationSec}
-            durationLoading={durationLoading}
           />
         )}
 
@@ -826,18 +775,54 @@ export function VideoBuilder() {
               onGenerate={handleGenerate}
               onCancel={() => abortRef.current?.abort()}
               onReset={() => {
-                if (objectUrlRef.current) {
-                  URL.revokeObjectURL(objectUrlRef.current);
-                  objectUrlRef.current = null;
-                }
+                const stale = objectUrlRef.current;
+                objectUrlRef.current = null;
                 setResultVideoUrl(null);
                 setGenLogs([]);
+                if (stale) setTimeout(() => URL.revokeObjectURL(stale), 1000);
               }}
               onStartOver={handleStartOver}
-              onBack={() => setStep(3)}
+              onBack={() => goTo(3)}
               locale={locale}
             />
           )}
+            </m.div>
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showSidePreview && selectedSurah && (
+              <m.aside
+                className="hidden lg:block"
+                initial={{ opacity: 0, x: 48 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 48 }}
+                transition={{ duration: 0.5, ease: EASE_OUT }}
+              >
+                <div className="sticky top-8">
+                  <LivePreview
+                    surah={selectedSurah}
+                    ayahs={selectedAyahsData}
+                    settings={settings}
+                    platform={selectedPlatform}
+                    bgVideoRef={bgVideoRef}
+                    previewIdx={Math.min(
+                      previewIdx,
+                      Math.max(0, selectedAyahsData.length - 1),
+                    )}
+                    onPreviewIdx={setPreviewIdx}
+                    locale={locale}
+                    height={400}
+                    showControls={false}
+                  />
+                  <p className="mt-3 max-w-[240px] text-center text-[13px] text-parchment-dim">
+                    {locale === "ar"
+                      ? "معاينة حية — مطابقة للفيديو النهائي"
+                      : "Live preview — pixel-accurate to the final video"}
+                  </p>
+                </div>
+              </m.aside>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

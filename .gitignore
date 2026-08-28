@@ -4,3 +4,13 @@ node_modules
 .vercel
 *.log
 .DS_Store
+*.tsbuildinfo
+.claude
+.agents
+.opencode
+.impeccable
+.codex
+.playwright
+.playwright-cli
+skills-lock.json
+/*.png

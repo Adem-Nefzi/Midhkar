@@ -37,12 +37,9 @@ import {
   AudioSample,
   QUALITY_HIGH,
   Input,
-  BlobSource,
   BufferSource,
   CanvasSink,
   ALL_FORMATS,
-  type WrappedCanvas,
-  type InputVideoTrack,
 } from "mediabunny";
 
 /* ── Message protocol ────────────────────────────────────────── */
@@ -72,13 +69,24 @@ export type WorkerInMessage =
         sampleRate: number;
         channels: number;
         segments: WorkerSegment[];
-        ayahFrameBitmaps: ImageBitmap[];
+        /** Total overlay bitmaps that will arrive via "overlays" messages.
+         *  They stream in batches (see below) instead of riding the start
+         *  message, so a 200-verse video never holds 200 full-res transparent
+         *  frames in worker RAM at once. */
+        overlayCount: number;
         /** Ordered playlist of background videos (raw bytes). Empty = no video bg.
          *  They're played back-to-back; the last loops if the total is shorter
          *  than the output, and items stop early if it's longer. */
         bgVideoBytes: ArrayBuffer[];
-        /** Cap on unique bg frames decoded PER VIDEO (decoded in parallel). */
+        /** Per-clip cap on unique bg frames decoded (sampled evenly). */
         maxBgFrames: number;
+        /** TOTAL bg frames allowed across the whole playlist. The worker
+         *  splits this across clips (by duration when known) so resident
+         *  bitmap memory never exceeds what the output can actually show. */
+        maxTotalBgFrames: number;
+        /** Known clip durations in seconds (0 = unknown), parallel to
+         *  bgVideoBytes — used to split maxTotalBgFrames proportionally. */
+        bgDurations: number[];
         /** One continuous PCM track for the whole video, mono Float32. */
         fullAudioTrack: ArrayBuffer;
         transitionStyle: "none" | "fade" | "slide" | "scale";
@@ -86,6 +94,11 @@ export type WorkerInMessage =
         /** Darkness overlay on top of the background video, 0–80 (%). */
         bgOverlayPct: number;
       };
+    }
+  | {
+      type: "overlays";
+      startIndex: number;
+      bitmaps: ImageBitmap[];
     }
   | { type: "abort" };
 
@@ -95,6 +108,37 @@ export type WorkerOutMessage =
   | { type: "error"; message: string };
 
 let aborted = false;
+
+/* ── Streaming overlay store ────────────────────────────────────
+   Overlay bitmaps arrive in batches AFTER the "start" message (they
+   are rendered progressively on the main thread). The encode loop
+   waits for the batch it needs, and closes each bitmap as soon as
+   the segment after it has been drawn — so worker RAM holds only a
+   handful of overlays at any moment, not one per verse. */
+const overlayStore: (ImageBitmap | null)[] = [];
+let overlaysReceived = 0;
+let overlayNotify: (() => void) | null = null;
+
+function storeOverlays(startIndex: number, bitmaps: ImageBitmap[]): void {
+  for (let i = 0; i < bitmaps.length; i++) {
+    overlayStore[startIndex + i] = bitmaps[i];
+  }
+  overlaysReceived += bitmaps.length;
+  if (overlayNotify) {
+    const n = overlayNotify;
+    overlayNotify = null;
+    n();
+  }
+}
+
+async function ensureOverlays(upTo: number): Promise<void> {
+  while (overlaysReceived < upTo + 1) {
+    if (aborted) throw new DOMException("Aborted", "AbortError");
+    await new Promise<void>((resolve) => {
+      overlayNotify = resolve;
+    });
+  }
+}
 
 // If the worker's own module init or any async path throws outside of
 // runEncode, main-thread onerror gets an empty Event. Surface everything.
@@ -118,10 +162,21 @@ self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
   const msg = e.data;
   if (msg.type === "abort") {
     aborted = true;
+    if (overlayNotify) {
+      const n = overlayNotify;
+      overlayNotify = null;
+      n();
+    }
+    return;
+  }
+  if (msg.type === "overlays") {
+    storeOverlays(msg.startIndex, msg.bitmaps);
     return;
   }
   if (msg.type === "start") {
     aborted = false;
+    overlayStore.length = 0;
+    overlaysReceived = 0;
     try {
       await runEncode(msg.payload);
     } catch (err: any) {
@@ -137,29 +192,37 @@ function post(m: WorkerOutMessage, transfer: Transferable[] = []) {
 
 type StartPayload = Extract<WorkerInMessage, { type: "start" }>["payload"];
 
+/* Split the total background-frame budget across playlist clips.
+   Proportional to known clip durations; even split when any duration is
+   unknown. `perClipCap` stays the absolute ceiling per clip. The result:
+   resident bg-bitmap memory never exceeds what the output can display,
+   instead of scaling with playlist length × per-clip cap. */
+function allocateBgBudget(
+  durations: number[],
+  count: number,
+  totalBudget: number,
+  perClipCap: number,
+): number[] {
+  if (count === 0) return [];
+  const durs =
+    durations.length === count ? durations : new Array<number>(count).fill(0);
+  const allKnown = durs.every((d) => isFinite(d) && d > 0);
+  if (allKnown) {
+    const sum = durs.reduce((a, b) => a + b, 0);
+    return durs.map((d) =>
+      Math.max(30, Math.min(perClipCap, Math.round((totalBudget * d) / sum))),
+    );
+  }
+  const even = Math.max(30, Math.floor(totalBudget / count));
+  return new Array<number>(count).fill(Math.min(perClipCap, even));
+}
+
 /* ══════════════════════════════════════════════════════════════
    Background video decode — unchanged from v2: sequential,
    hardware-accelerated, no seeking.
 ══════════════════════════════════════════════════════════════ */
 
 const FALLBACK_BG_COLOR = "#0b0b0f";
-
-/* Pull a canvas from the track at timestamp `t`, via a fresh sink each
-   time. Only ever called for the few seam frames (~10 per crossfade), so
-   the per-call seek cost is irrelevant. Returns null if no frame. */
-async function grabFrameAt(
-  track: InputVideoTrack,
-  cw: number,
-  ch: number,
-  t: number,
-): Promise<ImageBitmap | null> {
-  const sink = new CanvasSink(track, { width: cw, height: ch, fit: "cover" });
-  const r: WrappedCanvas | null = await sink.getCanvas(t).catch(() => null);
-  if (!r) return null;
-  return createImageBitmap(r.canvas as OffscreenCanvas, {
-    premultiplyAlpha: "premultiply",
-  });
-}
 
 async function decodeBackgroundFrames(
   bytes: ArrayBuffer,
@@ -282,9 +345,11 @@ async function runEncode(payload: StartPayload) {
     sampleRate,
     channels,
     segments,
-    ayahFrameBitmaps,
+    overlayCount,
     bgVideoBytes,
     maxBgFrames,
+    maxTotalBgFrames,
+    bgDurations,
     fullAudioTrack,
     transitionStyle,
     latencyMode,
@@ -328,38 +393,43 @@ async function runEncode(payload: StartPayload) {
      with a quick crossfade at each seam. The FINAL video loops if the
      whole playlist is shorter than the output. ────────────────────── */
    const videoCount = bgVideoBytes.length;
-   /* Per-clip budget: same for EVERY clip, NOT divided by count. Each video
-      gets up to `maxBgFrames` frames (= its whole playable span, sampled
-      evenly once it outgrows the budget). playlist of 5×60s clips ⇒ work
-      decodes 300 sampled frames from each one (skip ≈6 source frames) — full
-      coverage, no mini-loops, and the seams stay clean. */
-   const perVideoCap = Math.max(1, Math.floor(maxBgFrames));
-  const decodedCounts = new Array<number>(videoCount).fill(0);
-  const bgFramesPromise: Promise<ImageBitmap[][]> = videoCount
-    ? Promise.all(
-        bgVideoBytes.map((bytes, vi) =>
-          decodeBackgroundFrames(
-            bytes,
-            cw,
-            ch,
-            renderFps,
-            perVideoCap,
-            (done, total) => {
-              decodedCounts[vi] = done;
-              const sum = decodedCounts.reduce((a, b) => a + b, 0);
-              post({
-                type: "progress",
-                msg:
-                  videoCount > 1
-                    ? `Decoding backgrounds ${vi + 1}/${videoCount}…`
-                    : `Decoding background… ${done}/${total}`,
-                pct: 40 + Math.round((sum / (perVideoCap * videoCount)) * 8),
-              });
-            },
-          ),
-        ),
-      )
-    : Promise.resolve([]);
+   /* Per-clip budgets come from the shared total budget (≈ the output's own
+      unique frame count), so a long playlist can't multiply RAM use. Each
+      clip still gets up to `maxBgFrames` when the budget allows. */
+   const perVideoCaps = allocateBgBudget(
+     bgDurations,
+     videoCount,
+     Math.max(1, Math.floor(maxTotalBgFrames)),
+     Math.max(1, Math.floor(maxBgFrames)),
+   );
+   const bgBudgetTotal =
+     perVideoCaps.reduce((a, b) => a + b, 0) || 1;
+   const decodedCounts = new Array<number>(videoCount).fill(0);
+   const bgFramesPromise: Promise<ImageBitmap[][]> = videoCount
+     ? Promise.all(
+         bgVideoBytes.map((bytes, vi) =>
+           decodeBackgroundFrames(
+             bytes,
+             cw,
+             ch,
+             renderFps,
+             perVideoCaps[vi],
+             (done, total) => {
+               decodedCounts[vi] = done;
+               const sum = decodedCounts.reduce((a, b) => a + b, 0);
+               post({
+                 type: "progress",
+                 msg:
+                   videoCount > 1
+                     ? `Decoding backgrounds ${vi + 1}/${videoCount}…`
+                     : `Decoding background… ${done}/${total}`,
+                 pct: 40 + Math.round((sum / bgBudgetTotal) * 8),
+               });
+             },
+           ),
+         ),
+       )
+     : Promise.resolve([]);
 
   /* ── Encode audio: build native AudioData chunks directly ──────── */
   post({ type: "progress", msg: "Encoding audio…", pct: 48 });
@@ -410,17 +480,13 @@ async function runEncode(payload: StartPayload) {
   const usable = bgPlaylist.filter((l) => l.length > 0);
   const bgLen = usable.map((l) => l.length);
 
-  // Real playable length per clip = number of decoded frames, MINUS the tail
-  // we donate to the seam crossfade with the NEXT clip. 0 when alone. This
-  // is THE key that keeps every clip in its own slot even when sampling
-  // makes bgLen non-uniform (e.g. 180 frames of one 60s clip, then 60 of a
-  // 20s clip). `trackOf` below reads off these entries.
+  // Each clip's slot is its FULL decoded length; the last `seamFrames` of a
+  // slot dissolve into the next clip's first frame (see the compositor).
+  // Keeping the tail INSIDE the slot is what makes that region reachable —
+  // reserving it away (the old behaviour) silently killed every seam fade.
   const seamFrames = Math.min(10, Math.round(renderFps / 3)); // short crossfade between playlist items
-  const effLen = bgLen.map((len, i) =>
-    Math.max(1, bgLen.length > 1 && i < bgLen.length - 1 ? len - seamFrames : len),
-  );
   const bgCum: number[] = [0];
-  for (const n of effLen) bgCum.push(bgCum[bgCum.length - 1] + n);
+  for (const n of bgLen) bgCum.push(bgCum[bgCum.length - 1] + Math.max(1, n));
   const bgTotal = bgCum[bgCum.length - 1] || 1;
   const hasBg = bgLen.length > 0;
   if (aborted) {
@@ -452,15 +518,20 @@ async function runEncode(payload: StartPayload) {
 
   let globalRenderIdx = 0; // counts unique rendered frames
   let outputFrameIdx = 0;  // counts encoded (output) frames
+  let oldestOpenOverlay = 0;
 
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     if (aborted) throw new DOMException("Aborted", "AbortError");
 
+    // Wait until this segment's overlay AND the next one (needed for the
+    // outgoing crossfade) have streamed in from the main thread.
+    await ensureOverlays(Math.min(segIdx + 1, overlayCount - 1));
+
     const seg = segments[segIdx];
-    const overlay = ayahFrameBitmaps[segIdx];
+    const overlay = overlayStore[segIdx]!;
     const nextOverlay =
-      segIdx < segments.length - 1 ? ayahFrameBitmaps[segIdx + 1] : null;
-    const prevOverlay = segIdx > 0 ? ayahFrameBitmaps[segIdx - 1] : null;
+      segIdx < segments.length - 1 ? overlayStore[segIdx + 1] : null;
+    const prevOverlay = segIdx > 0 ? overlayStore[segIdx - 1] : null;
 
     // Boundary INTO this segment (crossfade tail from the previous verse)
     const inB = segIdx > 0 ? boundaries[segIdx - 1] : null;
@@ -479,11 +550,10 @@ async function runEncode(payload: StartPayload) {
       ctx.clearRect(0, 0, cw, ch);
       if (hasBg) {
         /* Deterministic wallpaper: `bgCum[i]` is clip i's START in the
-           output timeline, `bgTotal` is the LCM span of one full pass
+           output timeline, `bgTotal` is the span of one full pass
            (everything before any clip loops). Binary-search → (i, cursor).
-           `effLen[i] = bgLen[i] − seamFrames` for all but the last clip,
-           reserving each clip's tail as the crossfade into the NEXT one,
-           so a 6-second clip never bleeds into its successor's slot. */
+           Each slot is the clip's full decoded length; its final
+           `seamFrames` dissolve into the next clip's first frame. */
         const pos = globalRenderIdx % bgTotal;
         let l = 0, r = bgCum.length - 2;
         while (l < r) {
@@ -494,12 +564,11 @@ async function runEncode(payload: StartPayload) {
         const i = l;
         const cursor = pos - bgCum[i];
 
-        const cur = usable[i][cursor];
+        const cur = usable[i][Math.min(cursor, usable[i].length - 1)];
         ctx.drawImage(cur, 0, 0, cw, ch);
 
-        // `effLen` already reserved the tail; the current "slot" is ended
-        // exactly at bgLen[i] − seamFrames, any frame past it belongs to
-        // the crossfade with the NEXT clip (or clip0 on the wrap loop).
+        // Tail of the slot: dissolve into the NEXT clip's first frame
+        // (clip 0 on the wrap loop). Single-clip playlists skip this.
         const nextI = i + 1 < bgLen.length ? i + 1 : 0;
         const withinTail = cursor >= bgLen[i] - seamFrames;
         if (nextI !== i && withinTail && transitionStyle !== "none") {
@@ -601,6 +670,14 @@ async function runEncode(payload: StartPayload) {
         await new Promise((r) => setTimeout(r, 0));
       }
     }
+
+    // This segment is done; the next one only reads segIdx and segIdx+1,
+    // so everything older can be released.
+    for (let k = oldestOpenOverlay; k < segIdx; k++) {
+      overlayStore[k]?.close();
+      overlayStore[k] = null;
+    }
+    oldestOpenOverlay = segIdx;
   }
 
   videoSource.close();
@@ -613,7 +690,10 @@ async function runEncode(payload: StartPayload) {
   const buffer = (output.target as BufferTarget).buffer;
   if (!buffer) throw new Error("Finalize completed but buffer is empty");
 
-  ayahFrameBitmaps.forEach((b) => b.close());
+  for (let k = oldestOpenOverlay; k < overlayStore.length; k++) {
+    overlayStore[k]?.close();
+    overlayStore[k] = null;
+  }
   bgPlaylist.flat().forEach((b) => b.close());
 
   post({ type: "progress", msg: "Done!", pct: 100 });

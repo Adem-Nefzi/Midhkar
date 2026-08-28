@@ -21,9 +21,11 @@ export interface PexelsSearchResult {
 export async function searchPexelsVideos(
   query: string,
   page: number = 1,
+  signal?: AbortSignal,
 ): Promise<PexelsSearchResult> {
   const res = await fetch(
     `/api/pexels/search?query=${encodeURIComponent(query)}&page=${page}&per_page=30`,
+    { signal },
   );
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

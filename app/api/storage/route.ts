@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
-import { supabase, BUCKET } from "@/lib/supabase";
+import { getSupabase, BUCKET } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
+/* ── Supabase Library (disabled — restore by flipping this flag and
+   uncommenting the UI blocks in VideoBuilder.tsx / StepSettings.tsx) ── */
+const STORAGE_LIBRARY_ENABLED = false;
+
 export async function GET() {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!STORAGE_LIBRARY_ENABLED) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const supabase = getSupabase();
+  if (!supabase) {
     return NextResponse.json(
-      { error: "Supabase credentials not configured" },
-      { status: 500 },
+      { error: "Video library is not configured." },
+      { status: 503 },
     );
   }
 
@@ -19,14 +28,17 @@ export async function GET() {
 
     if (error) {
       console.error("Supabase storage list error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "Could not list the video library." },
+        { status: 502 },
+      );
     }
 
     const videoExts = /\.(mp4|webm|mov|mkv)$/i;
     const files = (data ?? [])
       .filter((file) => videoExts.test(file.name))
       .map((file) => {
-        const filePath = `Videos/${file.name}`;
+        const filePath = `videos/${file.name}`;
         const { data: urlData } = supabase.storage
           .from(BUCKET)
           .getPublicUrl(filePath);
@@ -43,6 +55,9 @@ export async function GET() {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error("Storage route error:", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not list the video library." },
+      { status: 502 },
+    );
   }
 }

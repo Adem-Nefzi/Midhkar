@@ -1,7 +1,21 @@
-import next from "eslint-config-next";
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+import { FlatCompat } from "@eslint/eslintrc";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const compat = new FlatCompat({ baseDirectory: __dirname });
 
 const eslintConfig = [
-  next,
+  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    rules: {
+      // External-API JSON + worker error plumbing are intentionally `any`
+      // in a few places; tracked for cleanup as those files get rewritten.
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
   {
     ignores: [
       "node_modules/**",
