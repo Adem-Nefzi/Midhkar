@@ -27,8 +27,7 @@ import {
 } from "./webcodecs-muxer";
 
 import {
-  getQuranApiAudioUrl,
-  getEveryayahAudioUrl,
+  getAudioUrlCandidates,
 } from "@/lib/quran";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, Platform } from "@/lib/types";
@@ -379,10 +378,7 @@ function getAudioUrls(
   ayahNum: number,
 ): string[] {
   if (reciter.source !== "quranapi" || !reciter.quranApiNo) return [];
-  const urls = [getQuranApiAudioUrl(reciter.quranApiNo, surahNum, ayahNum)];
-  const ev = getEveryayahAudioUrl(reciter.quranApiNo, surahNum, ayahNum);
-  if (ev) urls.push(ev);
-  return urls;
+  return getAudioUrlCandidates(reciter.quranApiNo, surahNum, ayahNum);
 }
 
 async function fetchAudioBuffer(

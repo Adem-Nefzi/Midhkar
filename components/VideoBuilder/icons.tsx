@@ -16,6 +16,17 @@ const stroke = {
 
 /* ── Ayah-end marker: numbered verse medallion ───────────────── */
 
+/** Symmetric 8-point star (two rotated squares) centered at (0,0). */
+function starPoints(cx: number, cy: number, rOuter: number, rInner: number) {
+  const pts: string[] = [];
+  for (let i = 0; i < 16; i++) {
+    const r = i % 2 === 0 ? rOuter : rInner;
+    const a = (Math.PI / 8) * i - Math.PI / 2;
+    pts.push(`${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`);
+  }
+  return pts.join(" ");
+}
+
 export function AyahMarker({
   value,
   className = "h-9 w-9",
@@ -28,9 +39,9 @@ export function AyahMarker({
   return (
     <span className={`ayah-marker ${className}`} aria-hidden="true">
       <svg viewBox="0 0 40 40">
-        <path
-          d="M20 2l4.2 4.9 6.4-1.5 1.5 6.4L37 16l-4.9 4.2 1.5 6.4-6.4 1.5L23 33l-4.2-4.9-6.4 1.5-1.5-6.4L6 19l4.9-4.2-1.5-6.4 6.4-1.5L20 2z"
-          transform="translate(1.2 1.2) scale(0.94)"
+        <polygon
+          points={starPoints(20, 20, 17, 15)}
+          transform={active ? "rotate(22.5 20 20)" : undefined}
           fill={active ? "rgba(212,175,55,0.16)" : "rgba(212,175,55,0.05)"}
           stroke="currentColor"
           strokeWidth="1.2"

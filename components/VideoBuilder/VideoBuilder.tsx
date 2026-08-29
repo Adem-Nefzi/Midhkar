@@ -7,8 +7,7 @@ import {
   fetchSurahs,
   fetchReciters,
   fetchAyahs,
-  getQuranApiAudioUrl,
-  getEveryayahAudioUrl,
+  getAudioUrlCandidates,
 } from "@/lib/quran";
 /* ── Supabase Library (disabled — restore by uncommenting) ──────
 import { fetchStorageVideos } from "@/lib/storage-client";
@@ -390,18 +389,12 @@ export function VideoBuilder() {
     const urls: string[] = [];
     if (selectedReciter.source === "quranapi" && selectedReciter.quranApiNo) {
       urls.push(
-        getQuranApiAudioUrl(
+        ...getAudioUrlCandidates(
           selectedReciter.quranApiNo,
           selectedSurah.number,
           firstAyah.numberInSurah,
         ),
       );
-      const ev = getEveryayahAudioUrl(
-        selectedReciter.quranApiNo,
-        selectedSurah.number,
-        firstAyah.numberInSurah,
-      );
-      if (ev) urls.push(ev);
     }
     if (!urls.length) {
       setAudioError("No audio available");

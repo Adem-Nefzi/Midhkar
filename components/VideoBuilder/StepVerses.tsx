@@ -9,7 +9,7 @@ import {
   TimerIcon,
 } from "./icons";
 import { Bloom } from "@/components/Ornament/ornaments";
-import { VERSE_PRESETS } from "@/lib/quran";
+import { VERSE_PRESETS, getAudioUrlCandidates } from "@/lib/quran";
 import type { Surah, Ayah, Reciter } from "@/lib/quran";
 
 interface Props {
@@ -67,9 +67,22 @@ export function StepVerses({
     }
     const reciter = reciters.find((r) => r.identifier === reciterIdentifier);
     if (!reciter?.quranApiNo) return;
-    const url = `https://the-quran-project.github.io/Quran-Audio/Data/${reciter.quranApiNo}/${surahNumber}_${hoveredAyah}.mp3`;
-    const audio = new Audio(url);
+    const urls = getAudioUrlCandidates(
+      reciter.quranApiNo,
+      surahNumber,
+      hoveredAyah,
+    );
+    if (!urls.length) return;
+    let idx = 0;
+    const audio = new Audio(urls[0]);
     audio.volume = 0.3;
+    audio.onerror = () => {
+      idx += 1;
+      if (idx < urls.length) {
+        audio.src = urls[idx];
+        audio.play().catch(() => {});
+      }
+    };
     previewAudioRef.current = audio;
     audio.play().catch(() => {});
     const timer = setTimeout(() => {

@@ -33,6 +33,9 @@ export interface Reciter {
   name: string;
   englishName: string;
   quranApiNo?: number;
+  photo?: string;
+  style?: "Murattal" | "Mujawwad" | "Muallim";
+  primary?: boolean;
   source: "alquran" | "quranapi";
 }
 
@@ -50,50 +53,96 @@ export const VERSE_PRESETS = [
   { id: "full", label: "Full Surah" },
 ];
 
-/* ── Reciter mapping (Quran Foundation recitation IDs → audio CDNs) ── */
+/* ── Reciter mapping (Quran Foundation recitation IDs → audio CDNs) ──
+   IDs and names realigned to api.quran.com/api/v4/resources/recitations
+   (the source of truth). CDN coverage probed per reciter (2026-08):
+   only ids 1–5 still have live the-quran-project Data/<id>/ folders —
+   `primary: true`; ids 6–12 are everyayah-only (`primary` omitted) and
+   getAudioUrlCandidates() skips the dead CDN for them. Styles come
+   from the API where present. Photos are cached Wikimedia portraits
+   (/reciters/, see public/reciters/CREDITS.md) — ar-Rifai has none. */
 const QURAN_FOUNDATION_RECITERS: Record<
   number,
-  { englishName: string; name: string; everyayahFolder: string }
+  {
+    englishName: string;
+    name: string;
+    everyayahFolder: string;
+    photo?: string;
+    style?: "Murattal" | "Mujawwad" | "Muallim";
+    primary?: boolean;
+  }
 > = {
   7: {
-    englishName: "Mishary Al Afasy",
+    englishName: "Mishari Rashid al-Afasy",
     name: "مشاري العفاسي",
     everyayahFolder: "Alafasy_128kbps",
+    photo: "afasy.jpg",
   },
-  4: {
-    englishName: "Abu Bakr Al Shatri",
-    name: "أبو بكر الشاطري",
-    everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps",
-  },
-  3: {
-    englishName: "Nasser Al Qatami",
-    name: "ناصر القطامي",
-    everyayahFolder: "Nasser_Alqatami_128kbps",
-  },
-  5: {
-    englishName: "Hani Ar Rifai",
-    name: "هاني الرفاعي",
-    everyayahFolder: "Hani_Rifai_192kbps",
+  2: {
+    englishName: "AbdulBaset AbdulSamad",
+    name: "عبد الباسط عبد الصمد",
+    everyayahFolder: "Abdul_Basit_Murattal_192kbps",
+    photo: "abdulbaset.jpg",
+    primary: true,
   },
   1: {
-    englishName: "AbdulBaset (Murattal)",
-    name: "عبد الباسط",
-    everyayahFolder: "Abdul_Basit_Murattal_192kbps",
+    englishName: "AbdulBaset AbdulSamad",
+    name: "عبد الباسط عبد الصمد",
+    everyayahFolder: "Abdul_Basit_Mujawwad_128kbps",
+    photo: "abdulbaset.jpg",
+    style: "Mujawwad",
+  },
+  3: {
+    englishName: "Abdur-Rahman as-Sudais",
+    name: "عبد الرحمن السديس",
+    everyayahFolder: "Abdurrahmaan_As-Sudais_192kbps",
+    photo: "sudais.jpg",
+    primary: true,
+  },
+  4: {
+    englishName: "Abu Bakr al-Shatri",
+    name: "أبو بكر الشاطري",
+    everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps",
+    photo: "shatri.jpg",
+    primary: true,
+  },
+  5: {
+    englishName: "Hani ar-Rifai",
+    name: "هاني الرفاعي",
+    everyayahFolder: "Hani_Rifai_192kbps",
+    primary: true,
   },
   6: {
-    englishName: "Mahmoud Al Husary",
-    name: "محمود الحصري",
+    englishName: "Mahmoud Khalil Al-Husary",
+    name: "محمود خليل الحصري",
     everyayahFolder: "Husary_128kbps",
+    photo: "husary.jpg",
   },
-  10: {
-    englishName: "Saud Al Shuraim",
-    name: "سعود الشريم",
-    everyayahFolder: "Saood_ash-Shuraym_128kbps",
+  12: {
+    englishName: "Mahmoud Khalil Al-Husary",
+    name: "محمود خليل الحصري",
+    everyayahFolder: "Husary_Muallim_128kbps",
+    photo: "husary.jpg",
+    style: "Muallim",
   },
   9: {
-    englishName: "Minshawi (Murattal)",
-    name: "المنشاوي",
+    englishName: "Mohamed Siddiq al-Minshawi",
+    name: "محمد صديق المنشاوي",
     everyayahFolder: "Minshawy_Murattal_128kbps",
+    photo: "minshawi.jpg",
+  },
+  8: {
+    englishName: "Mohamed Siddiq al-Minshawi",
+    name: "محمد صديق المنشاوي",
+    everyayahFolder: "Minshawy_Mujawwad_192kbps",
+    photo: "minshawi.jpg",
+    style: "Mujawwad",
+  },
+  10: {
+    englishName: "Saud ash-Shuraym",
+    name: "سعود الشريم",
+    everyayahFolder: "Saood_ash-Shuraym_128kbps",
+    photo: "shuraim.jpg",
   },
 };
 
@@ -168,32 +217,38 @@ export async function fetchReciters(): Promise<Reciter[]> {
     const recitations = data.recitations || [];
 
     for (const r of recitations) {
-      const mapped = QURAN_FOUNDATION_RECITERS[r.id];
-      if (!mapped) continue;
-      results.push({
-        identifier: `quranapi-${r.id}`,
-        englishName: mapped.englishName,
-        name: mapped.name,
-        quranApiNo: r.id,
-        source: "quranapi",
-      });
+    const mapped = QURAN_FOUNDATION_RECITERS[r.id];
+    if (!mapped) continue;
+    results.push({
+      identifier: `quranapi-${r.id}`,
+      englishName: mapped.englishName,
+      name: mapped.name,
+      quranApiNo: r.id,
+      photo: mapped.photo,
+      style: mapped.style ?? (r.style === "Murattal" || r.style === "Mujawwad" || r.style === "Muallim" ? r.style : undefined),
+      primary: mapped.primary ?? false,
+      source: "quranapi",
+    });
     }
   } catch {
     /* fall through to hardcoded */
   }
 
-  // Fallback: use hardcoded reciters if API fails
-  if (results.length === 0) {
-    for (const [no, info] of Object.entries(QURAN_FOUNDATION_RECITERS)) {
-      results.push({
-        identifier: `quranapi-${no}`,
-        englishName: info.englishName,
-        name: info.name,
-        quranApiNo: Number(no),
-        source: "quranapi",
-      });
+    // Fallback: use hardcoded reciters if API fails
+    if (results.length === 0) {
+      for (const [no, info] of Object.entries(QURAN_FOUNDATION_RECITERS)) {
+        results.push({
+          identifier: `quranapi-${no}`,
+          englishName: info.englishName,
+          name: info.name,
+          quranApiNo: Number(no),
+          photo: info.photo,
+          style: info.style,
+          primary: info.primary ?? false,
+          source: "quranapi",
+        });
+      }
     }
-  }
 
   return results;
 }
@@ -291,4 +346,26 @@ export function getEveryayahAudioUrl(
   const surahStr = String(surah).padStart(3, "0");
   const ayahStr = String(ayah).padStart(3, "0");
   return `https://everyayah.com/data/${entry.everyayahFolder}/${surahStr}${ayahStr}.mp3`;
+}
+
+/**
+ * Ordered URL candidates for one ayah, honoring probed CDN coverage:
+ * reciters whose the-quran-project folder 404s (`primary: false`)
+ * skip the dead CDN entirely — everyayah comes first. One source of
+ * truth for generation, the Settings preview, and hover-play.
+ */
+export function getAudioUrlCandidates(
+  reciterNo: number,
+  surah: number,
+  ayah: number,
+): string[] {
+  const entry = QURAN_FOUNDATION_RECITERS[reciterNo];
+  if (!entry) return [];
+  const urls: string[] = [];
+  if (entry.primary !== false) {
+    urls.push(getQuranApiAudioUrl(reciterNo, surah, ayah));
+  }
+  const ev = getEveryayahAudioUrl(reciterNo, surah, ayah);
+  if (ev) urls.push(ev);
+  return urls;
 }
