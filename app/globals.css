@@ -146,19 +146,19 @@
     border: 1px solid rgb(var(--gold) / 0.14);
     background: rgb(var(--ink-soft) / 0.55);
   }
-.panel-lit {
+  .panel-lit {
     border-radius: 14px;
     border: 1px solid rgb(var(--gold) / 0.38);
     background: rgb(var(--ink-soft) / 0.7);
     box-shadow:
       0 16px 44px -20px rgb(var(--gold) / 0.3),
       0 4px 16px -8px rgb(0 0 0 / 0.5);
-}
-.shadow-lit {
+  }
+  .shadow-lit {
     box-shadow:
       0 14px 40px -16px rgb(var(--gold) / 0.34),
       0 4px 14px -6px rgb(0 0 0 / 0.5);
-}
+  }
   .panel-inset {
     border-radius: 12px;
     border: 1px solid rgb(var(--gold) / 0.08);
@@ -749,6 +749,44 @@
   @keyframes seal-spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  /* ── Product tour: welcome card / coach-marks / target ring ── */
+  .tour-card-in {
+    animation: step-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .tour-tip-in {
+    animation: step-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .tour-sheet-in {
+    animation: tour-sheet-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes tour-sheet-up {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .tour-target {
+    position: relative;
+    border-radius: inherit;
+    outline: 2px solid rgb(var(--gold) / 0.65);
+    outline-offset: 3px;
+    box-shadow: 0 0 22px 2px rgb(var(--gold) / 0.28);
+    animation: tour-ring-pulse 2.2s ease-in-out infinite;
+  }
+  @keyframes tour-ring-pulse {
+    0%,
+    100% {
+      outline-offset: 3px;
+    }
+    50% {
+      outline-offset: 6px;
     }
   }
 }

@@ -86,6 +86,7 @@ function StepIndicator({
 
   return (
     <nav
+      data-tour="step-rail"
       className="mx-auto mb-12 flex w-fit items-center justify-center"
       aria-label="Progress"
     >
@@ -747,28 +748,31 @@ export function VideoBuilder() {
       />
 
       <div className="relative z-10 mx-auto max-w-7xl px-6 py-16 sm:py-20">
-        <div className="mb-10 text-center">
-          <div className="mb-3 flex items-center justify-center gap-2 text-gold/70">
-            <GardenMark className="h-7 w-7" />
+        <div className="relative mb-10">
+          <div className="text-center">
+            <div className="mb-3 flex items-center justify-center gap-2 text-gold/70">
+              <GardenMark className="h-7 w-7" />
+            </div>
+            <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              {locale === "ar" ? "استوديو الفيديو القرآني" : "Quran Video Studio"}
+            </h1>
+            <p className="mx-auto mt-2 max-w-md text-sm text-parchment-muted">
+              {selectedSurah
+                ? locale === "ar"
+                  ? `${selectedSurah.name} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
+                  : `${selectedSurah.englishName} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
+                : locale === "ar"
+                  ? "اختر سورة وقارئا واصنع فيديو قرآني احترافي مع الصوت الكامل"
+                  : "Choose a surah and reciter — generate a professional Quran video with full synchronized audio"}
+            </p>
           </div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-            {locale === "ar" ? "استوديو الفيديو القرآني" : "Quran Video Studio"}
-          </h1>
-          <p className="mx-auto mt-2 max-w-md text-sm text-parchment-muted">
-            {selectedSurah
-              ? locale === "ar"
-                ? `${selectedSurah.name} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
-                : `${selectedSurah.englishName} · ${selectedSurah.number}${sortedNums.length ? ` · ${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}` : ""}`
-              : locale === "ar"
-                ? "اختر سورة وقارئا واصنع فيديو قرآني احترافي مع الصوت الكامل"
-                : "Choose a surah and reciter — generate a professional Quran video with full synchronized audio"}
-          </p>
+
+          {/* Product Tour — dynamically imported to keep the wizard bundle lean.
+              Renders the "?" replay pill beside the heading + welcome card + coach-marks. */}
+          <ProductTour step={step} busy={isGenerating || !!resultVideoUrl} />
         </div>
 
         <StepIndicator step={step} locale={locale} onNavigate={goTo} />
-
-        {/* Product Tour — dynamically imported to keep the wizard bundle lean */}
-        <ProductTour step={step} />
 
         <div
           className={
