@@ -236,19 +236,19 @@ export function StepVerses({
       )}
 
       <div className="group relative mx-auto mb-5 max-w-md">
-        <SearchIcon className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/40 transition-colors group-focus-within:text-gold/80" />
+        <SearchIcon className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/40 transition-colors group-focus-within:text-gold/80" />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={
             locale === "ar"
-              ? "ابحث في الآيات..."
+              ? "ابحث في الآيات…"
               : locale === "fr"
-                ? "Rechercher des versets..."
-                : "Search verses..."
+                ? "Rechercher des versets…"
+                : "Search verses…"
           }
-          className="w-full rounded-xl border border-gold/20 bg-ink-soft/60 px-5 py-2.5 pl-10 text-sm text-parchment placeholder-parchment-dim outline-none transition-all focus:border-gold/55 focus:bg-ink-soft/90"
+          className="w-full rounded-2xl border border-gold/20 bg-ink-light/60 px-4 py-3.5 pl-11 text-sm text-parchment placeholder-parchment-dim outline-none transition-all focus:border-gold/55 focus:bg-ink-light/90 focus:ring-2 focus:ring-gold/15"
         />
       </div>
 
@@ -311,7 +311,7 @@ export function StepVerses({
                       </p>
                       {showTranslation && ayah.translation && (
                         <p
-                          className={`mt-1.5 text-[13px] leading-relaxed transition-colors duration-200 ${
+                          className={`mt-1.5 text-[15px] font-semibold leading-relaxed transition-colors duration-200 ${
                             sel
                               ? "text-parchment-muted"
                               : "text-parchment-dim"

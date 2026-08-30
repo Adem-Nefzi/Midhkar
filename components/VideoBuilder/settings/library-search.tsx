@@ -213,7 +213,7 @@ export function LibrarySearch({
         </a>
       </div>
 
-      <div className="relative">
+      <div className="group relative">
         <input
           type="text"
           value={query}
@@ -223,15 +223,15 @@ export function LibrarySearch({
           }}
           placeholder={
             ar
-              ? "ابحث: طبيعة، محيط، جبال..."
+              ? "ابحث: طبيعة، محيط، جبال…"
               : fr
-                ? "Rechercher : nature, océan, montagnes..."
-                : "Search: nature, ocean, mountains..."
+                ? "Rechercher : nature, océan, montagnes…"
+                : "Search: nature, ocean, mountains…"
           }
-          className="w-full rounded-lg border border-gold/20 bg-ink-soft/40 px-3 py-2.5 pl-9 text-sm text-parchment placeholder-parchment-dim outline-none transition focus:border-gold/40 focus:ring-1 focus:ring-gold/20"
+          className="w-full rounded-2xl border border-gold/20 bg-ink-light/60 px-4 py-3.5 pl-11 text-sm text-parchment placeholder-parchment-dim outline-none transition-all focus:border-gold/55 focus:bg-ink-light/90 focus:ring-2 focus:ring-gold/15"
         />
         <svg
-          className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/30"
+          className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/40 transition-colors group-focus-within:text-gold/80"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"

@@ -29,9 +29,9 @@ function cacheKey(
 /* â”€â”€ Font size map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export const FONT_SIZES = {
-  small: { arabic: 36, translation: 17, badge: 20 },
-  medium: { arabic: 52, translation: 22, badge: 26 },
-  large: { arabic: 68, translation: 26, badge: 30 },
+  small: { arabic: 36, translation: 19, badge: 20 },
+  medium: { arabic: 52, translation: 26, badge: 26 },
+  large: { arabic: 68, translation: 32, badge: 30 },
 };
 
 /* â”€â”€ Text wrapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -208,7 +208,7 @@ function measureTextBlock(
     let transLines: string[] = [];
     let transLineH = 0;
     if (s.showTranslation && translation) {
-      ctx.font = `${tSize}px ${s.translationFontFamily}`;
+      ctx.font = `600 ${tSize}px ${s.translationFontFamily}`;
       ctx.direction = "ltr";
       // Full translation, wrapped across the full text width â€” the
       // empty side space of the frame is put to work before any
@@ -390,7 +390,7 @@ export function drawAyahFrame(
   if (block.transLines.length) {
     cursorY += szTrans * 0.8;
     ctx.direction = "ltr";
-    ctx.font = `${szTrans}px ${s.translationFontFamily}`;
+    ctx.font = `600 ${szTrans}px ${s.translationFontFamily}`;
     ctx.textAlign = "center";
     ctx.fillStyle = s.translationColor;
     ctx.globalAlpha = s.translationOpacity / 100;
