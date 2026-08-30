@@ -2,7 +2,7 @@
  * api.test.ts — end-to-end HTTP test against the running service:
  * enqueue → SSE progress → MP4 download → probe.
  */
-const BASE = "http://localhost:7860";
+const BASE = process.env.RENDER_API_BASE ?? "http://localhost:7860";
 
 export {}; // module marker for top-level await
 
@@ -72,6 +72,7 @@ if (!vid.ok) throw new Error(`video GET failed: ${vid.status}`);
 const buf = Buffer.from(await vid.arrayBuffer());
 console.log("video bytes:", buf.length);
 if (buf.length < 100_000) throw new Error("video too small");
-const { writeFileSync } = await import("node:fs");
+const { writeFileSync, mkdirSync } = await import("node:fs");
+mkdirSync("test/out", { recursive: true });
 writeFileSync("test/out/api-server.mp4", buf);
 console.log("GATE: PASS");
