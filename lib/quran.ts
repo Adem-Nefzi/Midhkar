@@ -33,8 +33,6 @@ export interface Reciter {
   name: string;
   englishName: string;
   quranApiNo?: number;
-  photo?: string;
-  style?: "Murattal" | "Mujawwad" | "Muallim";
   primary?: boolean;
   source: "alquran" | "quranapi";
 }
@@ -57,53 +55,33 @@ export const VERSE_PRESETS = [
    IDs and names realigned to api.quran.com/api/v4/resources/recitations
    (the source of truth). CDN coverage probed per reciter (2026-08):
    only ids 1–5 still have live the-quran-project Data/<id>/ folders —
-   `primary: true`; ids 6–12 are everyayah-only (`primary` omitted) and
-   getAudioUrlCandidates() skips the dead CDN for them. Styles come
-   from the API where present. Photos are cached Wikimedia portraits
-   (/reciters/, see public/reciters/CREDITS.md) — ar-Rifai has none. */
+   `primary: true`; the rest are everyayah-only (`primary` omitted) and
+   getAudioUrlCandidates() skips the dead CDN for them. */
 const QURAN_FOUNDATION_RECITERS: Record<
   number,
-  {
-    englishName: string;
-    name: string;
-    everyayahFolder: string;
-    photo?: string;
-    style?: "Murattal" | "Mujawwad" | "Muallim";
-    primary?: boolean;
-  }
+  { englishName: string; name: string; everyayahFolder: string; primary?: boolean }
 > = {
   7: {
     englishName: "Mishari Rashid al-Afasy",
     name: "مشاري العفاسي",
     everyayahFolder: "Alafasy_128kbps",
-    photo: "afasy.jpg",
   },
   2: {
     englishName: "AbdulBaset AbdulSamad",
     name: "عبد الباسط عبد الصمد",
     everyayahFolder: "Abdul_Basit_Murattal_192kbps",
-    photo: "abdulbaset.jpg",
     primary: true,
-  },
-  1: {
-    englishName: "AbdulBaset AbdulSamad",
-    name: "عبد الباسط عبد الصمد",
-    everyayahFolder: "Abdul_Basit_Mujawwad_128kbps",
-    photo: "abdulbaset.jpg",
-    style: "Mujawwad",
   },
   3: {
     englishName: "Abdur-Rahman as-Sudais",
     name: "عبد الرحمن السديس",
     everyayahFolder: "Abdurrahmaan_As-Sudais_192kbps",
-    photo: "sudais.jpg",
     primary: true,
   },
   4: {
     englishName: "Abu Bakr al-Shatri",
     name: "أبو بكر الشاطري",
     everyayahFolder: "Abu_Bakr_Ash-Shaatree_128kbps",
-    photo: "shatri.jpg",
     primary: true,
   },
   5: {
@@ -116,33 +94,16 @@ const QURAN_FOUNDATION_RECITERS: Record<
     englishName: "Mahmoud Khalil Al-Husary",
     name: "محمود خليل الحصري",
     everyayahFolder: "Husary_128kbps",
-    photo: "husary.jpg",
-  },
-  12: {
-    englishName: "Mahmoud Khalil Al-Husary",
-    name: "محمود خليل الحصري",
-    everyayahFolder: "Husary_Muallim_128kbps",
-    photo: "husary.jpg",
-    style: "Muallim",
   },
   9: {
     englishName: "Mohamed Siddiq al-Minshawi",
     name: "محمد صديق المنشاوي",
     everyayahFolder: "Minshawy_Murattal_128kbps",
-    photo: "minshawi.jpg",
-  },
-  8: {
-    englishName: "Mohamed Siddiq al-Minshawi",
-    name: "محمد صديق المنشاوي",
-    everyayahFolder: "Minshawy_Mujawwad_192kbps",
-    photo: "minshawi.jpg",
-    style: "Mujawwad",
   },
   10: {
     englishName: "Saud ash-Shuraym",
     name: "سعود الشريم",
     everyayahFolder: "Saood_ash-Shuraym_128kbps",
-    photo: "shuraim.jpg",
   },
 };
 
@@ -224,8 +185,6 @@ export async function fetchReciters(): Promise<Reciter[]> {
       englishName: mapped.englishName,
       name: mapped.name,
       quranApiNo: r.id,
-      photo: mapped.photo,
-      style: mapped.style ?? (r.style === "Murattal" || r.style === "Mujawwad" || r.style === "Muallim" ? r.style : undefined),
       primary: mapped.primary ?? false,
       source: "quranapi",
     });
@@ -242,8 +201,6 @@ export async function fetchReciters(): Promise<Reciter[]> {
           englishName: info.englishName,
           name: info.name,
           quranApiNo: Number(no),
-          photo: info.photo,
-          style: info.style,
           primary: info.primary ?? false,
           source: "quranapi",
         });

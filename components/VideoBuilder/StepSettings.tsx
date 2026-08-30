@@ -34,52 +34,6 @@ import {
 } from "./icons";
 import { TEXT_POSITIONS } from "@/lib/quran";
 import type { Reciter } from "@/lib/quran";
-
-/* Reciter portrait (cached Wikimedia photos, /reciters/) with an
-   initials monogram fallback when no photo exists. */
-function ReciterAvatar({
-  reciter,
-  active,
-}: {
-  reciter: Reciter;
-  active: boolean;
-}) {
-  const initials = reciter.englishName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("");
-
-  return (
-    <span
-      className={`relative flex h-9 w-9 shrink-0 overflow-hidden rounded-full border transition-colors ${
-        active ? "border-gold/60" : "border-gold/15"
-      }`}
-    >
-      {reciter.photo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`/reciters/${reciter.photo}`}
-          alt=""
-          loading="lazy"
-          draggable={false}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center bg-gold/[0.08] font-display text-[13px] tracking-wider text-gold/80">
-          {initials}
-        </span>
-      )}
-    </span>
-  );
-}
-
-const STYLE_LABELS: Record<string, { en: string; ar: string }> = {
-  Murattal: { en: "Murattal", ar: "مرتل" },
-  Mujawwad: { en: "Mujawwad", ar: "مجود" },
-  Muallim: { en: "Muallim", ar: "معلم" },
-};
 /* ── Supabase Library (disabled — restore by uncommenting) ──────
 import type { StorageVideo } from "@/lib/storage-client";
 ──────────────────────────────────────────────────────────────── */
@@ -441,7 +395,7 @@ export function StepSettings({
               <Spinner />
             </div>
           ) : (
-            <div className="custom-scrollbar max-h-[360px] space-y-2 overflow-y-auto pr-1">
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-2.5">
               {reciters.map((r) => {
                 const active = selectedReciter?.identifier === r.identifier;
                 return (
@@ -454,21 +408,15 @@ export function StepSettings({
                         : "border-gold/10 hover:border-gold/30 hover:bg-ink-soft/60"
                     }`}
                   >
-                    <ReciterAvatar reciter={r} active={active} />
+                    <div
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${active ? "border-gold/50 bg-gold/20" : "border-gold/15 bg-gold/5"}`}
+                    >
+                      <MicIcon className="h-4 w-4 text-gold" />
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-medium text-parchment">
-                          {r.englishName}
-                        </p>
-                        {r.style && (
-                          <span
-                            className="shrink-0 rounded-full bg-verdant/15 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-verdant"
-                            title={r.style}
-                          >
-                            {STYLE_LABELS[r.style]?.en ?? r.style}
-                          </span>
-                        )}
-                      </div>
+                      <p className="truncate text-sm font-medium text-parchment">
+                        {r.englishName}
+                      </p>
                       <p
                         className="truncate text-[13px] text-parchment-muted"
                         style={{ fontFamily: "'Amiri', serif" }}

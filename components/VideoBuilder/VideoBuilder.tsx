@@ -285,6 +285,10 @@ export function VideoBuilder() {
       setSelectedNums(new Set());
       setResultVideoUrl(null);
       stopAudio();
+      // Auto-advance: let the select-bloom confirmation land, then
+      // slide to the Verses step — no Continue button to hunt for.
+      setStepDir(1);
+      setStep(2);
     },
     [stopAudio],
   );
@@ -695,7 +699,6 @@ export function VideoBuilder() {
             loading={surahsLoading}
             selected={selectedSurah}
             onSelect={handleSurahSelect}
-            onNext={() => goTo(2)}
             locale={locale}
           />
         )}

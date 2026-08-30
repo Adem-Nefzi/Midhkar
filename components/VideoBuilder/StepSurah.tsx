@@ -5,7 +5,6 @@ import {
   GeometricRosette,
   SearchIcon,
   CheckIcon,
-  ArrowIcon,
   AyahMarker,
   IslamicDivider,
 } from "./icons";
@@ -16,7 +15,6 @@ interface Props {
   loading: boolean;
   selected: Surah | null;
   onSelect: (s: Surah) => void;
-  onNext: () => void;
   locale: string;
 }
 
@@ -40,7 +38,6 @@ export function StepSurah({
   loading,
   selected,
   onSelect,
-  onNext,
   locale,
 }: Props) {
   const ar = locale === "ar";
@@ -125,7 +122,7 @@ export function StepSurah({
       : L({ en: "Medinan", fr: "Médinoise", ar: "مدنية" });
 
   return (
-    <div className={`animate-step-in ${selected ? "pb-28" : ""}`}>
+    <div className="animate-step-in">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="mb-8 text-center">
         <p
@@ -355,43 +352,6 @@ export function StepSurah({
             </div>
           )}
         </>
-      )}
-
-      {/* ── Sticky continue bar (thumb-reachable on mobile) ────── */}
-      {selected && (
-        <div className="fixed inset-x-0 bottom-0 z-40 pb-[env(safe-area-inset-bottom)]">
-          <div className="mx-auto max-w-xl px-4 pb-4">
-            <div className="panel-lit animate-step-in flex items-center gap-3 rounded-2xl p-3 pl-4 backdrop-blur-sm">
-              <AyahMarker
-                value={selected.number}
-                className="h-10 w-10 shrink-0"
-                active
-              />
-              <div className="min-w-0 flex-1">
-                <p
-                  className="truncate text-base leading-tight text-parchment"
-                  style={{ fontFamily: "'Amiri', serif" }}
-                  lang="ar"
-                  dir="rtl"
-                  translate="no"
-                >
-                  {selected.name}
-                </p>
-                <p className="truncate text-[13px] text-parchment-muted">
-                  {selected.englishName} · {selected.numberOfAyahs}{" "}
-                  {L({ en: "verses", fr: "versets", ar: "آية" })}
-                </p>
-              </div>
-              <button
-                onClick={onNext}
-                className="btn-primary flex shrink-0 items-center gap-2 px-5 py-3 text-[13px]"
-              >
-                {L({ en: "Continue", fr: "Continuer", ar: "التالي" })}
-                <ArrowIcon className="h-3.5 w-3.5 rtl:rotate-180" />
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
