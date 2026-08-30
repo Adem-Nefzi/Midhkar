@@ -146,14 +146,19 @@
     border: 1px solid rgb(var(--gold) / 0.14);
     background: rgb(var(--ink-soft) / 0.55);
   }
-  .panel-lit {
+.panel-lit {
     border-radius: 14px;
     border: 1px solid rgb(var(--gold) / 0.38);
     background: rgb(var(--ink-soft) / 0.7);
     box-shadow:
       0 16px 44px -20px rgb(var(--gold) / 0.3),
       0 4px 16px -8px rgb(0 0 0 / 0.5);
-  }
+}
+.shadow-lit {
+    box-shadow:
+      0 14px 40px -16px rgb(var(--gold) / 0.34),
+      0 4px 14px -6px rgb(0 0 0 / 0.5);
+}
   .panel-inset {
     border-radius: 12px;
     border: 1px solid rgb(var(--gold) / 0.08);

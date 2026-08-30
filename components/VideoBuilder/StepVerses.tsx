@@ -162,7 +162,7 @@ export function StepVerses({
         </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center justify-center gap-2" data-tour="verses-presets">
         {VERSE_PRESETS.map((preset) => {
           const count =
             preset.id === "full"

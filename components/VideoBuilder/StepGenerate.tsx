@@ -425,6 +425,7 @@ export function StepGenerate({
           <button
             onClick={handleGenerateClick}
             className="btn-primary px-10 py-3.5 text-sm"
+            data-tour="generate-button"
           >
             <VideoCameraIcon className="h-4 w-4" />
             {ar

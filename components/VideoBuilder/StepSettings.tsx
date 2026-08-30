@@ -294,7 +294,7 @@ export function StepSettings({
           <div className="h-px flex-1 bg-gold/10" />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-tour="platform-cards">
           {(
             Object.entries(PLATFORM_META) as [
               PlatformId,

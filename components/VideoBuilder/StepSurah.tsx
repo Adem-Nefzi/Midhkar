@@ -148,7 +148,7 @@ export function StepSurah({
       </div>
 
       {/* ── Search + filters ───────────────────────────────────── */}
-      <div className="mx-auto mb-6 max-w-3xl space-y-3">
+      <div className="mx-auto mb-6 max-w-3xl space-y-3" data-tour="surah-search">
         <div className="group relative">
           <SearchIcon className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gold/40 transition-colors group-focus-within:text-gold/80" />
           <input

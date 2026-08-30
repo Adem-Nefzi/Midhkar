@@ -51,6 +51,11 @@ const StepSettings = dynamic(() =>
   { ssr: false },
 );
 
+const ProductTour = dynamic(() =>
+  import("./tour").then((m) => m.Tour),
+  { ssr: false },
+);
+
 function buildPlatform(id: PlatformId): Platform {
   const meta = PLATFORM_META[id];
   return {
@@ -761,6 +766,9 @@ export function VideoBuilder() {
         </div>
 
         <StepIndicator step={step} locale={locale} onNavigate={goTo} />
+
+        {/* Product Tour — dynamically imported to keep the wizard bundle lean */}
+        <ProductTour step={step} />
 
         <div
           className={
