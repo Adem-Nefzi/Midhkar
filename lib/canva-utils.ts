@@ -22,8 +22,9 @@ function cacheKey(
   surah: Surah,
   s: VideoSettings,
   maxW: number,
+  safeH: number,
 ): string {
-  return `${ayah?.numberInSurah ?? "none"}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.translationLang}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}`;
+  return `${ayah?.numberInSurah ?? "none"}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.translationLang}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}|${Math.round(safeH)}`;
 }
 
 /* ── Font size map ───────────────────────────────────────────── */
@@ -231,7 +232,15 @@ export interface TextBlock {
   transLines: string[];
   transLineH: number;
   totalH: number;
+  arabicSize: number;
+  translationSize: number;
+  badgeSize: number;
 }
+
+/* Readable floors for the auto-fit: even the longest verse in the
+   Qur'an (2:282) stays legible at these sizes on a 1080-wide frame. */
+const ARABIC_FLOOR = 24;
+const TRANS_FLOOR = 13;
 
 function measureTextBlock(
   ctx: CanvasRenderingContext2D,
@@ -239,55 +248,97 @@ function measureTextBlock(
   surah: Surah,
   s: VideoSettings,
   maxW: number,
+  safeH: number,
   sz: { arabic: number; translation: number; badge: number },
 ): TextBlock {
-  const key = cacheKey(ayah, surah, s, maxW);
+  const key = cacheKey(ayah, surah, s, maxW, safeH);
   const cached = textBlockCache.get(key);
   if (cached) return cached;
 
   const arabicText = ayah?.text ?? "";
-  ctx.font = `${sz.arabic}px ${s.fontFamily}`;
-  ctx.direction = "rtl";
-  const arabicLines = wrapText(ctx, arabicText, maxW);
-  const arabicLineH = sz.arabic * 1.7;
+  const translation = ayah?.translation ?? "";
 
-  let badgeText: string | null = null;
-  if (ayah && (s.showSurahName || s.showVerseNumber)) {
-    const parts: string[] = [];
-    if (s.showSurahName) parts.push(surah.name);
-    if (s.showVerseNumber)
-      parts.push(`(${surah.number}:${ayah.numberInSurah})`);
-    badgeText = parts.join("  ");
-  }
+  const measure = (
+    aSize: number,
+    tSize: number,
+    bSize: number,
+  ): TextBlock => {
+    ctx.font = `${aSize}px ${s.fontFamily}`;
+    ctx.direction = "rtl";
+    const arabicLines = wrapText(ctx, arabicText, maxW);
+    const arabicLineH = aSize * 1.7;
 
-  let transLines: string[] = [];
-  let transLineH = 0;
-  if (s.showTranslation && ayah?.translation) {
-    ctx.font = `${sz.translation}px ${s.translationFontFamily}`;
-    ctx.direction = "ltr";
-    const trans =
-      ayah.translation.length > 200
-        ? ayah.translation.slice(0, 200) + "..."
-        : ayah.translation;
-    transLines = wrapText(ctx, trans, maxW * 0.82);
-    transLineH = sz.translation * 1.5;
-  }
+    let badgeText: string | null = null;
+    if (ayah && (s.showSurahName || s.showVerseNumber)) {
+      const parts: string[] = [];
+      if (s.showSurahName) parts.push(surah.name);
+      if (s.showVerseNumber)
+        parts.push(`(${surah.number}:${ayah.numberInSurah})`);
+      badgeText = parts.join("  ");
+    }
 
-  let totalH = arabicLines.length * arabicLineH;
-  if (badgeText) totalH += sz.badge * 2.2;
-  if (transLines.length)
-    totalH += transLines.length * transLineH + sz.translation * 0.8;
+    let transLines: string[] = [];
+    let transLineH = 0;
+    if (s.showTranslation && translation) {
+      ctx.font = `${tSize}px ${s.translationFontFamily}`;
+      ctx.direction = "ltr";
+      // Full translation, wrapped across the full text width — the
+      // empty side space of the frame is put to work before any
+      // shrinking is considered.
+      transLines = wrapText(ctx, translation, maxW * 0.95);
+      transLineH = tSize * 1.5;
+    }
 
-  const result: TextBlock = {
-    arabicLines,
-    arabicLineH,
-    badgeText,
-    transLines,
-    transLineH,
-    totalH,
+    let totalH = arabicLines.length * arabicLineH;
+    if (badgeText) totalH += bSize * 2.2;
+    if (transLines.length)
+      totalH += transLines.length * transLineH + tSize * 0.8;
+
+    return {
+      arabicLines,
+      arabicLineH,
+      badgeText,
+      transLines,
+      transLineH,
+      totalH,
+      arabicSize: aSize,
+      translationSize: tSize,
+      badgeSize: bSize,
+    };
   };
-  textBlockCache.set(key, result);
-  return result;
+
+  let block = measure(sz.arabic, sz.translation, sz.badge);
+
+  // Gentle auto-fit: only when the block genuinely overflows, scale
+  // fonts down proportionally (max 3 steps) but never below the
+  // readable floors. Most verses never enter this loop — the wider
+  // translation wrap already handles them at full size.
+  if (block.totalH > safeH) {
+    for (let i = 0; i < 3; i++) {
+      const scale = Math.max(
+        ARABIC_FLOOR / sz.arabic,
+        Math.min(0.88, safeH / block.totalH),
+      );
+      const aSize = Math.max(ARABIC_FLOOR, Math.round(block.arabicSize * scale));
+      const tSize = Math.max(TRANS_FLOOR, Math.round(block.translationSize * scale));
+      const bSize = Math.max(
+        Math.round(ARABIC_FLOOR * 0.6),
+        Math.round(block.badgeSize * scale),
+      );
+      const next = measure(aSize, tSize, bSize);
+      block = next;
+      if (block.totalH <= safeH) break;
+      if (
+        block.arabicSize <= ARABIC_FLOOR &&
+        block.translationSize <= TRANS_FLOOR
+      ) {
+        break;
+      }
+    }
+  }
+
+  textBlockCache.set(key, block);
+  return block;
 }
 
 export function drawAyahFrame(
@@ -307,7 +358,10 @@ export function drawAyahFrame(
   const safeBottom = h - pad * 1.2;
   const safeH = safeBottom - safeTop;
 
-  const block = measureTextBlock(ctx, ayah, surah, s, maxW, sz);
+  const block = measureTextBlock(ctx, ayah, surah, s, maxW, safeH, sz);
+  const szArabic = block.arabicSize;
+  const szTrans = block.translationSize;
+  const szBadge = block.badgeSize;
 
   let startY =
     s.textPosition === "top"
@@ -337,7 +391,7 @@ export function drawAyahFrame(
   ctx.globalAlpha = 1;
 
   // ── Arabic text ──────────────────────────────────────────────
-  ctx.font = `${sz.arabic}px ${s.fontFamily}`;
+  ctx.font = `${szArabic}px ${s.fontFamily}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.direction = "rtl";
@@ -360,7 +414,7 @@ export function drawAyahFrame(
   if (s.textOutline) {
     ctx.save();
     ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.lineWidth = sz.arabic * 0.04;
+    ctx.lineWidth = szArabic * 0.04;
     ctx.lineJoin = "round";
     ctx.globalAlpha = (s.textOpacity / 100) * textAlpha;
     block.arabicLines.forEach((line, i) => {
@@ -390,9 +444,9 @@ export function drawAyahFrame(
 
   // ── Surah / verse badge ──────────────────────────────────────
   if (block.badgeText) {
-    cursorY += sz.badge * 0.8;
+    cursorY += szBadge * 0.8;
     ctx.direction = "ltr";
-    ctx.font = `bold ${sz.badge}px 'Noto Naskh Arabic', serif`;
+    ctx.font = `bold ${szBadge}px 'Noto Naskh Arabic', serif`;
     ctx.textAlign = "center";
     ctx.fillStyle = s.textColor;
     ctx.globalAlpha = 0.85;
@@ -401,14 +455,14 @@ export function drawAyahFrame(
     if (cursorY < safeBottom) ctx.fillText(block.badgeText, w / 2, cursorY);
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
-    cursorY += sz.badge * 1.4;
+    cursorY += szBadge * 1.4;
   }
 
   // ── Translation ──────────────────────────────────────────────
   if (block.transLines.length) {
-    cursorY += sz.translation * 0.8;
+    cursorY += szTrans * 0.8;
     ctx.direction = "ltr";
-    ctx.font = `${sz.translation}px ${s.translationFontFamily}`;
+    ctx.font = `${szTrans}px ${s.translationFontFamily}`;
     ctx.textAlign = "center";
     ctx.fillStyle = s.translationColor;
     ctx.globalAlpha = s.translationOpacity / 100;
@@ -424,7 +478,7 @@ export function drawAyahFrame(
   }
 
   // ── Bottom decorative rule ───────────────────────────────────
-  const ruleY = Math.min(cursorY + sz.badge * 1.2, safeBottom);
+  const ruleY = Math.min(cursorY + szBadge * 1.2, safeBottom);
   ctx.globalAlpha = 0.18;
   ctx.strokeStyle = s.textColor;
   ctx.lineWidth = 1;

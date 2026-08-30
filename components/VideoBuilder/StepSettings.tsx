@@ -268,7 +268,7 @@ export function StepSettings({
             )}
             {selectedReciter && (
               <span className="flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/[0.06] px-3 py-1 text-[13px] text-parchment-muted">
-                <MicIcon className="h-3 w-3 text-gold/70" />
+                <MicIcon className="h-3 w-3 shrink-0 text-gold/70" />
                 {selectedReciter.englishName}
               </span>
             )}
@@ -395,7 +395,7 @@ export function StepSettings({
               <Spinner />
             </div>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-2.5">
+            <div className="space-y-2">
               {reciters.map((r) => {
                 const active = selectedReciter?.identifier === r.identifier;
                 return (
@@ -414,11 +414,11 @@ export function StepSettings({
                       <MicIcon className="h-4 w-4 text-gold" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-parchment">
+                      <p className="text-sm font-medium leading-snug text-parchment">
                         {r.englishName}
                       </p>
                       <p
-                        className="truncate text-[13px] text-parchment-muted"
+                        className="text-[13px] leading-snug text-parchment-muted"
                         style={{ fontFamily: "'Amiri', serif" }}
                       >
                         {r.name}
