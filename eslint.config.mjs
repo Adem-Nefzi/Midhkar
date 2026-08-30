@@ -27,6 +27,7 @@ const eslintConfig = [
       ".claude/**",
       ".codex/**",
       ".playwright*/**",
+      "render-service/**",
     ],
   },
 ];

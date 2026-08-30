@@ -283,6 +283,11 @@ export async function fetchVerseByKey(
 }
 
 /* ── Per-ayah audio URLs ────────────────────────────────────────── */
+/** everyayah.com folder name for a reciter (cloud-render spec building) */
+export function getEveryayahFolder(reciterNo: number): string {
+  return QURAN_FOUNDATION_RECITERS[reciterNo]?.everyayahFolder ?? "";
+}
+
 /** Primary: the-quran-project CDN (reliable, fast) */
 export function getQuranApiAudioUrl(
   reciterNo: number,

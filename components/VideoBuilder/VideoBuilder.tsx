@@ -26,7 +26,14 @@ import {
   prefetchAudio,
   clearAudioCache,
   estimateTotalDurationSec,
+  isWebCodecsSupported,
 } from "@/lib/generate-video";
+import {
+  cloudRenderConfigured,
+  renderVideoCloud,
+  uploadBgVideo,
+} from "@/lib/render-client";
+import { getEveryayahFolder } from "@/lib/quran";
 import { GardenMark, Bloom } from "@/components/Ornament/ornaments";
 import { StudioBackdrop } from "./studio-backdrop";
 import { CheckIcon } from "./icons";
@@ -487,18 +494,102 @@ export function VideoBuilder() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
-    try {
-      const blob = await generateVideo({
-        ayahs: selectedAyahsData,
-        surah: selectedSurah,
-        reciter: selectedReciter,
-        settings,
-        platform: selectedPlatform,
-        onLog: (log) => {
-          setGenLogs((prev) => [...prev.slice(-4), stamp(log)]);
+    const pushLog = (log: { msg: string; pct: number }) => {
+      setGenLogs((prev) => [...prev.slice(-4), stamp(log)]);
+    };
+
+    /* ── Cloud-first render, local fallback ──────────────────────
+       On any cloud failure (host asleep, queue full, timeout), we
+       fall through to the in-browser WebCodecs pipeline — generation
+       can never fully die. */
+    const cloudHandleRef: { current: { cancel: () => void } | null } = {
+      current: null,
+    };
+
+    const buildCloudSpec = async () => {
+      let bg: { mode: "pexels" | "upload" | "none"; urls?: string[]; uploadId?: string } = {
+        mode: "none",
+      };
+      if (settings.background === "pexels" || settings.background === "library") {
+        const urls = settings.videoUrls?.length
+          ? settings.videoUrls
+          : settings.videoUrl
+            ? [settings.videoUrl]
+            : [];
+        if (urls.length) bg = { mode: "pexels", urls };
+      } else if (
+        settings.background === "upload" &&
+        settings.uploadedVideoFile instanceof File
+      ) {
+        const uploadId = await uploadBgVideo(settings.uploadedVideoFile, (msg, pct) =>
+          pushLog({ msg, pct }),
+        );
+        if (!uploadId) throw new Error("Background upload failed");
+        bg = { mode: "upload", uploadId };
+      }
+      return {
+        ayahs: selectedAyahsData.map((a) => ({
+          key: selectedSurah!.number + ":" + a.numberInSurah,
+          numberInSurah: a.numberInSurah,
+          text: a.text,
+          translation: a.translation ?? "",
+        })),
+        surah: {
+          number: String(selectedSurah!.number),
+          name: selectedSurah!.name,
+          englishName: selectedSurah!.englishName,
         },
-        signal: ctrl.signal,
-      });
+        reciter: {
+          quranApiNo: selectedReciter!.quranApiNo ?? 0,
+          everyayahFolder: getEveryayahFolder(selectedReciter!.quranApiNo ?? 0),
+          primary: selectedReciter!.primary !== false,
+        },
+        settings: settings as unknown as Record<string, unknown>,
+        platform: {
+          aspect: selectedPlatform.aspect as "16:9" | "9:16" | "1:1",
+          id: selectedPlatform.id,
+        },
+        bg,
+        quality: { isLowPower: false },
+      };
+    };
+
+    try {
+      let blob: Blob | null = null;
+
+      if (cloudRenderConfigured()) {
+        try {
+          blob = await renderVideoCloud(
+            await buildCloudSpec(),
+            (msg, pct) => pushLog({ msg, pct }),
+            cloudHandleRef,
+          );
+        } catch (cloudErr: any) {
+          if (cloudErr?.name === "AbortError" || ctrl.signal.aborted) {
+            throw new DOMException("Aborted", "AbortError");
+          }
+          if (!isWebCodecsSupported()) throw cloudErr;
+          // Local pipeline can carry it — note + fall through.
+          pushLog({
+            msg: "Cloud unavailable — rendering on your device…",
+            pct: 0,
+          });
+          blob = null;
+        }
+      }
+
+      if (!blob) {
+        blob = await generateVideo({
+          ayahs: selectedAyahsData,
+          surah: selectedSurah,
+          reciter: selectedReciter,
+          settings,
+          platform: selectedPlatform,
+          onLog: pushLog,
+          signal: ctrl.signal,
+        });
+      }
+
       if (objectUrlRef.current) {
         // Defer: the result <video> may still hold this src until React
         // re-renders; revoking synchronously logs ERR_FILE_NOT_FOUND.
