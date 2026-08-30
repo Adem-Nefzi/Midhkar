@@ -1,114 +1,151 @@
 # Deploying the Midhkar Render Service
 
-The render service (`render-service/`) is a Docker container. You build
-it once (root `Dockerfile`, verified working: health + full 4-verse
-render e2e in 22.8s) and deploy it anywhere that runs containers.
-
-**You must deploy it somewhere** — it cannot run on Vercel (Vercel
-functions cap at ~10s-60s and have no ffmpeg).
+The render service (`render-service/`) is a Docker container (root
+`Dockerfile` — verified: boots, `/api/health` OK, full 4-verse render
+e2e). **You must deploy it somewhere** — it cannot run on Vercel
+(functions cap at 10-60s, no ffmpeg).
 
 ## TL;DR — the recommendation
 
 | Host | Verdict |
 |---|---|
-| **Google Cloud Run** ✅ | **Best option.** ~2,000 renders/month completely free (always-free tier), scale-to-zero (no idle cost), reliable, no sleep lag. Needs a Google billing account (card required, but usage stays $0 at our scale). |
-| Hugging Face Spaces | CPU Basic compute is $0/hr, **but creating Docker Spaces now requires a paid PRO plan ($9/mo)** — no longer free. |
-| Koyeb | No more free tier — cheapest plan is $29/mo. Eliminated. |
-| Render free tier | 512MB RAM — too small for ffmpeg + frame buffers; spins down. Not recommended. |
-| Oracle Cloud Always-Free VM | Truly free 4-core ARM VM, but requires Linux sysadmin (you manage the VM, Docker, TLS). Viable if you refuse all cards. |
-| Railway | $5 one-time trial credit — fine for testing, then paid. |
+| **Render free tier** ✅ *no card* | **Works** — verified empirically: our container completes a full render inside 512MB (after an x264 memory-diet fix) at 0.5 CPU. On Render's real 0.1 CPU a short video takes **4-6 min**. Spins down after 15 min idle (~1 min wake, client auto-falls back). Zero card, zero cost, easiest setup. |
+| **Google Cloud Run** ✅ *fastest* | **Best performance-free**: ~3,000 renders/month always-free, scale-to-zero, renders in ~40-60s. Requires a card on the billing account (bill stays $0 at our scale). |
+| Hugging Face Spaces | CPU compute is $0/hr but creating Docker Spaces now needs a paid PRO plan ($9/mo). No longer free. |
+| Koyeb | Killed their free tier — $29/mo minimum. |
+| Oracle Always-Free VM | Truly free 4-core ARM, but you manage Linux/Docker/TLS yourself. Only if you refuse all cards. |
+
+**If you have a card:** Cloud Run (fast renders, bigger free allowance).
+**If you refuse all cards:** Render free tier — it genuinely works now.
 
 ---
 
-## Option A — Google Cloud Run (recommended)
+## Option A — Render free tier (no card) — step by step
 
-**Free-tier math (verified 2026-08 from cloud.google.com/run/pricing):**
-always-free = 240,000 vCPU-seconds + 450,000 GiB-seconds/month.
-One render ≈ 2 vCPU × 40s = 80 vCPU-s + 4GiB × 40s = 160 GiB-s.
-→ **~3,000 renders/month free** (CPU-bound), far beyond Midhkar's needs.
-Scale-to-zero: you pay nothing when idle. A card is required for the
-billing account, but the bill stays $0 unless you exceed the tier.
+Verified facts (docs.render.com/free, 2026-08): free web service =
+**512MB RAM / 0.1 CPU**, spins down after **15 min idle** (wake ≈ 1 min,
+a loading page is shown meanwhile), **750 free instance-hours/month**
+(a spun-down service doesn't consume them — effectively unlimited for
+personal use), 5GB outbound bandwidth + 500 build minutes/month, no
+persistent disk, ephemeral filesystem, custom domains + TLS included.
 
-### Step by step
+Our service was **empirically tested under these limits**: with the
+`x264-params ref=1:rc-lookahead=8:bframes=0` memory profile, the golden
+4-verse render completes in a 512MB container (peak ~200MB Node + ffmpeg)
+and produces a valid MP4. At 0.5 CPU it took 148s; at Render's 0.1 CPU
+expect **~4-6 minutes per short video**. The client already tolerates
+this: progress watchdog is 120s, wake budget 90s, and any true failure
+falls back to in-browser rendering automatically.
 
-1. **Google account** → https://console.cloud.google.com → agree/trial.
-2. **Create a project**: project picker (top bar) → *New Project* →
-   name it `midhkar` → note the **Project ID**.
-3. **Enable billing**: *Billing* in the left menu → link a card.
-   (No charge occurs at our usage; you can set a budget alert at
-   *Billing → Budgets → Create budget → $1* for total peace of mind.)
-4. **Install the gcloud CLI**: https://cloud.google.com/sdk/docs/install
-   then:
+### Steps
+
+1. **Push this repo to GitHub** (the `main` branch with v5.2+):
    ```bash
-   gcloud auth login
-   gcloud config set project YOUR_PROJECT_ID
+   git push origin main
    ```
-5. **Deploy from the repo root** (Windows: run in Git Bash/WSL):
+   (If you deploy before pushing, Render can't see the code.)
+
+2. **Sign up** at https://dashboard.render.com (email or Google — **no
+   card required**).
+
+3. Dashboard → **New** → **Web Service** → connect your GitHub account →
+   pick the **Midhkar** repository.
+
+4. Configure:
+   - **Name**: `midhkar-render`
+   - **Language/Type**: *Docker* (Render auto-detects the root `Dockerfile` —
+     if it asks, set **Dockerfile Path** to `./Dockerfile` and **Docker Build
+     Context** to the repo root `.`)
+   - **Compute plan**: **Free** (512MB / 0.1 CPU)
+   - **Health Check Path**: `/api/health`
+   - **Environment variables** (Advanced → Add):
+     - `ALLOWED_ORIGINS` = `https://midhkar.vercel.app,http://localhost:3000`
+     - `NODE_ENV` = `production` (already in the Dockerfile)
+   - Instance hours: leave default.
+
+5. **Create Web Service** — first build takes ~4-8 min (apt ffmpeg +
+   npm install). Watch the logs; success ends with
+   `midhkar-render on http://0.0.0.0:7860`.
+
+6. **Test it** (Render shows your URL, e.g.
+   `https://midhkar-render.onrender.com`):
+   ```bash
+   curl https://midhkar-render.onrender.com/api/health
+   # {"ok":true,"active":0,"waiting":0}
+   ```
+   First request after idle takes ~1 min (spin-up) — that's normal.
+
+7. **Point the app at it** — Vercel → Midhkar → Settings → Environment
+   Variables → Production **and** Preview:
+   ```
+   NEXT_PUBLIC_RENDER_API_URL=https://midhkar-render.onrender.com
+   ```
+   → **Redeploy** the app. Done.
+
+### Updating later
+Push to `main` — Render auto-builds and deploys (zero-downtime).
+
+### Render-specific behavior to know
+- **Sleep**: after 15 min with no traffic the service sleeps. The next
+  user's generate triggers a wake (~1 min) — the client shows
+  "Contacting render service…" then streams. If wake exceeds 90s, it
+  silently falls back to browser rendering.
+- **Bandwidth**: 5GB/month ≈ ~4,000 video downloads (1-2MB each). Fine
+  for personal scale; Render emails you at 80%.
+- **Queue**: our service enforces max 2 concurrent renders itself —
+  at 0.1 CPU more than 1 concurrent render isn't advisable anyway.
+
+---
+
+## Option B — Google Cloud Run (fastest free option; needs card)
+
+**Free-tier math (verified 2026-08, cloud.google.com/run/pricing):**
+always-free = 240,000 vCPU-s + 450,000 GiB-s/month. One render ≈
+2 vCPU × 40s → **~3,000 renders/month free**. Scale-to-zero, no idle
+cost. A card is required for the billing account; set a $1 budget alert
+for peace of mind.
+
+### Steps
+
+1. `console.cloud.google.com` → new project `midhkar` (note Project ID).
+2. Billing → link a card → create a **$1 budget alert**.
+3. Install gcloud CLI → `gcloud auth login` →
+   `gcloud config set project YOUR_PROJECT_ID`.
+4. From the repo root (Git Bash/WSL on Windows):
    ```bash
    ./scripts/deploy-cloud-run.sh YOUR_PROJECT_ID europe-west1
    ```
-   The script builds via Cloud Build (~3-5 min) and deploys with the
-   settings the service needs: `--port 7860 --cpu 2 --memory 4Gi
+   Deploys with the required flags: `--port 7860 --cpu 2 --memory 4Gi
    --timeout 3600 --cpu-boost --concurrency 1 --max-instances 2`.
-   (`--timeout 3600` matters: default 60s would kill the SSE progress
-   stream mid-render.)
-6. **Copy the printed URL** (`https://midhkar-render-…run.app`), test:
-   ```bash
-   curl https://YOUR-SERVICE-URL/api/health
-   # {"ok":true,"active":0,"waiting":0}
-   ```
-7. **Point the app at it**: Vercel → Midhkar project → Settings →
-   Environment Variables → add for Production:
-   ```
-   NEXT_PUBLIC_RENDER_API_URL=https://midhkar-render-…run.app
-   ```
-   Redeploy the app. Done — generation now renders in the cloud and
-   falls back to the browser automatically if the service is down.
-
-### Updating later
-Re-run the deploy script — Cloud Run reuses the same service name; new
-image, zero-downtime rollout.
+   (`--timeout 3600` matters — default 60s would kill SSE mid-render.)
+5. `curl https://midhkar-render-…run.app/api/health` → `{"ok":true}`.
+6. Set `NEXT_PUBLIC_RENDER_API_URL` on Vercel → redeploy.
 
 ---
 
-## Option B — Any Docker host (Koyeb, Railway, Fly.io, a VPS…)
+## Any other Docker host (Koyeb/Railway/Fly/VPS)
 
-The container is generic (listens on `$PORT`, default 7860). Manual
-deploy on any platform:
-
+The container is generic (listens on `$PORT`, default 7860):
 ```bash
 docker build -t midhkar-render .
 docker run -p 7860:7860 -e ALLOWED_ORIGINS="https://midhkar.vercel.app" midhkar-render
 ```
+Host requirements: ≥2 vCPU + ≥4GB RAM for full-speed rendering
+(the image itself now runs in 512MB if needed — the x264 profile
+trades speed for memory), request timeout ≥ 10 min, ffmpeg included
+(the Dockerfile installs it).
 
-Requirements for the host: **≥2 vCPU, ≥4GB RAM**, request timeout
-≥ 10 minutes (renders + SSE), ffmpeg included (the Dockerfile installs
-it — don't use slim/runtimes that strip apt).
-
----
-
-## Local testing
+## Local dev & container test
 
 ```bash
-cd render-service
-npm install
-npm run dev                          # http://localhost:7860
-# in another terminal (app):
-NEXT_PUBLIC_RENDER_API_URL=http://localhost:7860 npm run dev
-```
-
-Container e2e (against the built image):
-```bash
-docker build -t midhkar-render .
-docker run -d -p 7861:7860 --name mrt midhkar-render
-cd render-service
-RENDER_API_BASE=http://localhost:7861 npx tsx test/api.test.ts
+cd render-service && npm install && npm run dev   # :7860
+# against the built image:
+docker build -t midhkar-render . && docker run -d -p 7861:7860 --name mrt midhkar-render
+RENDER_API_BASE=http://127.0.0.1:7861 npx tsx test/api.test.ts   # full e2e
 docker rm -f mrt
 ```
 
-## Cost guardrails (Cloud Run)
-
-- `--min-instances 0` — scale to zero, idle costs $0
-- `--max-instances 2` — caps concurrent spend
-- Budget alert at $1 — email before anything real accrues
-- Free tier resets monthly; unused allowance does not roll over
+## Cost guardrails
+- Render: no card on file = zero possible spend (hard cap by design).
+- Cloud Run: `--min-instances 0` (scale-to-zero), `--max-instances 2`,
+  $1 budget alert.

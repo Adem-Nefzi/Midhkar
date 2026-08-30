@@ -383,6 +383,8 @@ export async function renderVideo(
     "-ac", "1",
     "-i", audioPath,
     "-c:v", "libx264",
+    "-threads", "2",
+    "-x264-params", "ref=1:rc-lookahead=8:bframes=0:threads=2",
     "-profile:v", "high",
     "-level", x264Level,
     "-b:v", String(bitrate),

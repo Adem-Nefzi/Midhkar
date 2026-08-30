@@ -8,9 +8,13 @@
  */
 
 const RENDER_API_URL = process.env.NEXT_PUBLIC_RENDER_API_URL ?? "";
-const RENDER_TIMEOUT_MS = 5 * 60 * 1000; // hard ceiling for whole job
-const NO_PROGRESS_TIMEOUT_MS = 45_000; // no milestone → assume host died
-const HEALTH_WAKE_TIMEOUT_MS = 40_000; // cold-start wake budget
+// Render free-tier reality: 0.1 CPU renders ~5× slower than a 2vCPU box
+// (~4-6 min for a short video) and the service sleeps after 15 min idle
+// (spin-up adds ~60s). Budgets below keep the cloud path alive through
+// both, while still falling back to local if the host truly dies.
+const RENDER_TIMEOUT_MS = 12 * 60 * 1000; // hard ceiling for whole job
+const NO_PROGRESS_TIMEOUT_MS = 120_000; // no milestone → assume host died
+const HEALTH_WAKE_TIMEOUT_MS = 90_000; // cold-start/spin-up wake budget
 const MAX_CLOUD_DURATION_MIN = 10;
 
 export interface CloudAyahSpec {

@@ -5,8 +5,10 @@ Pixel-compatible with the client's WebCodecs pipeline — same timing math,
 same overlays (vendored canva-utils), same encode ladder.
 
 **Deployment: see [DEPLOY.md](./DEPLOY.md).**
-Recommended host: Google Cloud Run (free tier ≈ thousands of renders/month,
-scale-to-zero). Hugging Face Spaces Docker now requires a paid PRO plan.
+Two free options: **Render free tier** (no card, renders in ~4-6 min,
+service sleeps when idle — verified working at 512MB) or **Google Cloud
+Run** (card required for billing, renders in ~40-60s, ~3,000/month
+always-free).
 
 ## API
 
