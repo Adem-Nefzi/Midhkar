@@ -205,6 +205,50 @@ export async function estimateTotalDurationSec({
   }
 }
 
+/**
+ * Per-ayah decoded durations (seconds), index-aligned with `ayahs`.
+ * Feeds the serverless render planner — the server trusts the client
+ * for chunk boundaries but verifies totals (10-min cap).
+ */
+export async function estimateAyahDurationsSec({
+  ayahs,
+  reciter,
+  surah,
+  signal,
+}: {
+  ayahs: Ayah[];
+  reciter: Reciter;
+  surah: Surah;
+  signal?: AbortSignal;
+}): Promise<number[] | null> {
+  if (!ayahs.length) return [];
+  acquireAudioContext();
+  try {
+    const durations = await parallelMap(
+      ayahs,
+      async (ayah) => {
+        if (signal?.aborted) return 0;
+        const key = reciter.quranApiNo
+          ? audioCacheKey(reciter.quranApiNo, surah.number, ayah.numberInSurah)
+          : "";
+        let samples = key ? (audioCacheGet(key) ?? null) : null;
+        if (!samples) {
+          const urls = getAudioUrls(reciter, surah.number, ayah.numberInSurah);
+          const raw = await fetchAudioBuffer(urls, signal);
+          samples = raw ? await decodeAndResample(raw) : null;
+          if (samples && key) audioCacheSet(key, samples);
+        }
+        return samples ? samples.length / SAMPLE_RATE : FALLBACK_DUR;
+      },
+      AUDIO_CONCURRENCY,
+    );
+    if (signal?.aborted) return null;
+    return durations;
+  } finally {
+    releaseAudioContext();
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════
    Wake Lock (unchanged)
 ══════════════════════════════════════════════════════════════ */

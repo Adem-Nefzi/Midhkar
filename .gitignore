@@ -17,3 +17,4 @@ skills-lock.json
 render-service/node_modules
 render-service/test/out
 render-service/test-out-audio.f32
+.env*

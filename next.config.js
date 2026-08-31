@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 module.exports = {
   poweredByHeader: false,
+  /* Native/binary deps must stay external — webpack cannot bundle
+   * .node binaries or static ffmpeg executables. Rendered at runtime
+   * by the /api/render functions.
+   * Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/serverExternalPackages */
+  serverExternalPackages: [
+    "@napi-rs/canvas",
+    "ffmpeg-static",
+    "ffprobe-static",
+  ],
   async headers() {
     return [
       {

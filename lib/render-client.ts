@@ -1,171 +1,276 @@
 "use client";
 /**
- * render-client.ts — cloud render API client with automatic local
- * fallback. Mirrors the generateVideo() contract: progress via onLog,
- * returns a Blob. Any failure (host asleep, timeout, HTTP error,
- * unsupported feature) rejects — the caller falls back to the existing
- * WebCodecs pipeline.
+ * render-client.ts — serverless chunked render client.
+ *
+ * The whole render runs in /api/render/* on the app's own Vercel
+ * functions; the browser only uploads the spec, drives chunk calls,
+ * and downloads the MP4. Chunk POSTs are idempotent, so retries and
+ * re-generation of the same selection resume instead of re-rendering.
+ *
+ * Any failure rejects; the caller falls back to the in-browser
+ * WebCodecs pipeline (see VideoBuilder.handleGenerate).
  */
 
-const RENDER_API_URL = process.env.NEXT_PUBLIC_RENDER_API_URL ?? "";
-// Render free-tier reality: 0.1 CPU renders ~5× slower than a 2vCPU box
-// (~4-6 min for a short video) and the service sleeps after 15 min idle
-// (spin-up adds ~60s). Budgets below keep the cloud path alive through
-// both, while still falling back to local if the host truly dies.
-const RENDER_TIMEOUT_MS = 12 * 60 * 1000; // hard ceiling for whole job
-const NO_PROGRESS_TIMEOUT_MS = 120_000; // no milestone → assume host died
-const HEALTH_WAKE_TIMEOUT_MS = 90_000; // cold-start/spin-up wake budget
-const MAX_CLOUD_DURATION_MIN = 10;
+import type { RenderPlanSpec } from "@/lib/render-plan";
+import { MAX_TOTAL_SEC } from "@/lib/render-plan";
 
-export interface CloudAyahSpec {
-  key: string;
-  numberInSurah: number;
-  text: string;
-  translation: string;
+const API = "/api/render";
+const JOB_KEY = "midhkar-render-job";
+const CHUNK_TIMEOUT_MS = 5 * 60 * 1000 + 30_000; // route maxDuration + slack
+const PLAN_TIMEOUT_MS = 90_000;
+
+interface JobState {
+  jobId: string;
+  chunks: number;
+  specHash: string;
 }
 
-export interface CloudRenderSpec {
-  ayahs: CloudAyahSpec[];
-  surah: { number: string; name: string; englishName: string };
-  reciter: { quranApiNo: number; everyayahFolder: string; primary: boolean };
-  settings: Record<string, unknown>;
-  platform: { aspect: "16:9" | "9:16" | "1:1"; id: string };
-  bg: { mode: "pexels" | "upload" | "none"; urls?: string[]; uploadId?: string };
-  quality: { isLowPower: boolean };
-}
-
-export function cloudRenderConfigured(): boolean {
-  return RENDER_API_URL.length > 0;
-}
-
-/** Quick wake-ping with a generous budget for HF cold starts. */
-export async function cloudRenderAwake(): Promise<boolean> {
-  if (!cloudRenderConfigured()) return false;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), HEALTH_WAKE_TIMEOUT_MS);
+function loadJob(): JobState | null {
   try {
-    const r = await fetch(`${RENDER_API_URL}/api/health`, {
-      signal: ctrl.signal,
-    });
-    return r.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Upload a background video file; returns uploadId or null. */
-export async function uploadBgVideo(
-  file: File,
-  onLog?: (msg: string, pct: number) => void,
-): Promise<string | null> {
-  try {
-    onLog?.("Uploading background video…", 8);
-    const r = await fetch(`${RENDER_API_URL}/api/upload`, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
-    if (!r.ok) return null;
-    const { uploadId } = (await r.json()) as { uploadId: string };
-    return uploadId;
+    const raw = sessionStorage.getItem(JOB_KEY);
+    return raw ? (JSON.parse(raw) as JobState) : null;
   } catch {
     return null;
   }
+}
+
+function saveJob(state: JobState | null): void {
+  try {
+    if (state) sessionStorage.setItem(JOB_KEY, JSON.stringify(state));
+    else sessionStorage.removeItem(JOB_KEY);
+  } catch {
+    /* private mode — resume just won't survive refresh */
+  }
+}
+
+async function hashSpec(spec: RenderPlanSpec): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(spec));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function deleteJob(jobId: string): Promise<void> {
+  await fetch(`${API}/download?jobId=${jobId}`, { method: "DELETE" }).catch(
+    () => {},
+  );
+}
+
+/** Abandoned-job hygiene when the Generate step mounts. */
+export function clearStaleJob(): void {
+  const job = loadJob();
+  if (job) void deleteJob(job.jobId);
+  saveJob(null);
+}
+
+/* Composite abort (timer + user signal) without AbortSignal.any —
+ * the cloud path is the ONLY path on browsers too old for it. */
+function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
+  const composite = new AbortController();
+  const onAbort = () => composite.abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => composite.abort(), ms);
+  composite.signal.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    },
+    { once: true },
+  );
+  return composite.signal;
 }
 
 export interface CloudRenderHandle {
   cancel: () => void;
 }
 
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: withTimeout(signal, timeoutMs),
+  });
+  const parsed = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(parsed.error || `Request failed (${res.status})`);
+  return parsed;
+}
+
+/** True when the selection fits the serverless render window. */
+export function cloudCanRender(spec: {
+  ayahs: { durationSec: number }[];
+  settings?: Record<string, unknown>;
+}): boolean {
+  const spacing = Number(spec.settings?.verseSpacing ?? 0) || 0;
+  const total = spec.ayahs.reduce((s, a) => s + a.durationSec + spacing, 0);
+  return total <= MAX_TOTAL_SEC;
+}
+
 /**
- * Render server-side. Resolves with the MP4 Blob.
- * Rejects on ANY failure — caller must fall back to local rendering.
+ * Upload the background video for a job. Production: Vercel Blob
+ * client upload (browser → Blob direct, no 4.5MB function-body cap).
+ * Dev (no Blob store): direct multipart POST — localhost has no
+ * meaningful body limit.
+ */
+async function uploadBgFile(
+  jobId: string,
+  file: File,
+  onLog: (msg: string, pct: number) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  onLog("Uploading background video…", 3);
+  try {
+    const { upload } = await import("@vercel/blob/client");
+    await upload(`renders/${jobId}/bg-input.mp4`, file, {
+      access: "private",
+      handleUploadUrl: `${API}/upload-token`,
+      multipart: true,
+      onUploadProgress: (p) => onLog(`Uploading background… ${p.percentage}%`, 3),
+      abortSignal: signal,
+    });
+  } catch (err) {
+    if (signal.aborted) throw err;
+    const form = new FormData();
+    form.append("jobId", jobId);
+    form.append("bg", file);
+    const res = await fetch(`${API}/plan`, {
+      method: "POST",
+      body: form,
+      signal: withTimeout(signal, PLAN_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error || "Background upload failed");
+    }
+  }
+}
+
+/**
+ * Render server-side in verse-aligned chunks. Resolves with the MP4 Blob.
+ * Rejects on ANY failure — the caller must fall back to local rendering.
+ * Re-generating the same spec resumes from whatever chunks already exist.
  */
 export async function renderVideoCloud(
-  spec: CloudRenderSpec,
+  spec: RenderPlanSpec,
   onLog: (msg: string, pct: number) => void,
   handleRef: { current: CloudRenderHandle | null },
+  bgFile?: File | null,
 ): Promise<Blob> {
-  if (!cloudRenderConfigured()) throw new Error("Cloud render not configured");
-
   const ctrl = new AbortController();
   handleRef.current = { cancel: () => ctrl.abort() };
 
-  const t0 = Date.now();
+  if (!cloudCanRender(spec)) {
+    throw new Error(
+      "Selection longer than 10 minutes — rendering on your device instead",
+    );
+  }
+
+  const specHash = await hashSpec(spec);
+  let succeeded = false;
+
   try {
-    onLog("Contacting render service…", 2);
-    const res = await fetch(`${RENDER_API_URL}/api/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(spec),
-      signal: ctrl.signal,
-    });
-    if (res.status === 429) throw new Error("Render queue is full");
-    if (!res.ok) throw new Error(`Render service error (${res.status})`);
-    const { jobId } = (await res.json()) as { jobId: string };
-
-    onLog("Queued — rendering on the server…", 4);
-
-    const sse = await fetch(`${RENDER_API_URL}/api/render/${jobId}`, {
-      signal: ctrl.signal,
-    });
-    if (!sse.ok || !sse.body) throw new Error("Progress stream failed");
-
-    const reader = sse.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let lastMilestone = Date.now();
-
-    const deadline = setTimeout(() => ctrl.abort(), RENDER_TIMEOUT_MS);
-    const watchdog = setInterval(() => {
-      if (Date.now() - lastMilestone > NO_PROGRESS_TIMEOUT_MS) {
-        ctrl.abort();
-      }
-    }, 5000);
-
-    try {
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const events = buf.split("\n\n");
-        buf = events.pop() ?? "";
-        for (const ev of events) {
-          if (ev.startsWith("event: error")) {
-            const data = ev.split("\n").find((l) => l.startsWith("data: "))?.slice(6);
-            const message = data ? (JSON.parse(data) as { message: string }).message : "Render failed";
-            throw new Error(message || "Render failed");
-          }
-          if (ev.startsWith("event: cancelled")) {
-            throw new DOMException("Aborted", "AbortError");
-          }
-          if (ev.startsWith("event: done")) {
-            onLog("Downloading your video…", 98);
-            const vid = await fetch(`${RENDER_API_URL}/api/render/${jobId}/video`, {
-              signal: ctrl.signal,
-            });
-            if (!vid.ok) throw new Error("Video download failed");
-            const blob = await vid.blob();
-            onLog("Video ready (cloud render)", 100);
-            return blob;
-          }
-          const dataLine = ev.split("\n").find((l) => l.startsWith("data: "));
-          if (dataLine) {
-            lastMilestone = Date.now();
-            const p = JSON.parse(dataLine.slice(6)) as { msg: string; pct: number };
-            onLog(`☁ ${p.msg}`, Math.max(2, p.pct));
-          }
+    /* 1. Plan — or resume an existing job for this exact spec. */
+    let job: JobState | null = null;
+    const previous = loadJob();
+    if (previous && previous.specHash === specHash) {
+      try {
+        const status = await fetch(
+          `${API}/status?jobId=${previous.jobId}`,
+          { signal: withTimeout(ctrl.signal, 30_000) },
+        );
+        if (status.ok) {
+          const s = (await status.json()) as {
+            jobId: string;
+            chunks: number;
+            finalized: boolean;
+          };
+          job = { jobId: s.jobId, chunks: s.chunks, specHash };
+          onLog("Resuming previous render…", 5);
         }
+      } catch {
+        /* stale entry — fall through to a fresh plan */
       }
-      throw new Error("Progress stream ended unexpectedly");
-    } finally {
-      clearTimeout(deadline);
-      clearInterval(watchdog);
     }
+    if (previous && (!job || job.jobId !== previous.jobId)) {
+      void deleteJob(previous.jobId);
+    }
+    if (!job) {
+      onLog("Preparing server render…", 2);
+      const planRes = await postJson<{
+        jobId: string;
+        chunks: number;
+      }>(
+        "/plan",
+        spec,
+        PLAN_TIMEOUT_MS,
+        ctrl.signal,
+      );
+      job = { jobId: planRes.jobId, chunks: planRes.chunks, specHash };
+      saveJob(job);
+      onLog(
+        `Queued — ${planRes.chunks} server chunk${planRes.chunks > 1 ? "s" : ""}…`,
+        4,
+      );
+    }
+
+    /* 1b. Background upload (upload mode) — browser → Blob direct. */
+    if (bgFile) {
+      await uploadBgFile(job.jobId, bgFile, onLog, ctrl.signal);
+    }
+
+    /* 2. Chunks (sequential; idempotent per chunk) */
+    const chunkSpan = 90 / job.chunks; // 5% → 95%
+    for (let i = 0; i < job.chunks; i++) {
+      if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      onLog(
+        `Rendering part ${i + 1}/${job.chunks} on the server…`,
+        Math.round(5 + i * chunkSpan),
+      );
+      await postJson<{ ok: boolean }>(
+        "/chunk",
+        { jobId: job.jobId, chunk: i },
+        CHUNK_TIMEOUT_MS,
+        ctrl.signal,
+      );
+    }
+
+    /* 3. Finalize (lossless concat + faststart) */
+    if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+    onLog("Assembling final video…", 96);
+    await postJson<{ ok: boolean }>(
+      "/finalize",
+      { jobId: job.jobId },
+      180_000,
+      ctrl.signal,
+    );
+
+    /* 4. Download */
+    onLog("Downloading your video…", 98);
+    const vid = await fetch(`${API}/download?jobId=${job.jobId}`, {
+      signal: ctrl.signal,
+    });
+    if (!vid.ok) throw new Error("Video download failed");
+    const blob = await vid.blob();
+    succeeded = true;
+    onLog("Video ready (server render)", 100);
+    return blob;
   } finally {
+    /* Free storage on success or user cancel. On other failures keep
+       the chunks — a retry of the same spec resumes them (cron sweeps
+       truly abandoned jobs after 24h). */
+    if (succeeded || ctrl.signal.aborted) {
+      const job = loadJob();
+      if (job) void deleteJob(job.jobId);
+      saveJob(null);
+    }
     handleRef.current = null;
-    void t0;
   }
 }

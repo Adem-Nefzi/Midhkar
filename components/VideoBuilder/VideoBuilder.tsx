@@ -26,12 +26,12 @@ import {
   prefetchAudio,
   clearAudioCache,
   estimateTotalDurationSec,
+  estimateAyahDurationsSec,
   isWebCodecsSupported,
 } from "@/lib/generate-video";
 import {
-  cloudRenderConfigured,
   renderVideoCloud,
-  uploadBgVideo,
+  clearStaleJob,
 } from "@/lib/render-client";
 import { getEveryayahFolder } from "@/lib/quran";
 import { GardenMark, Bloom } from "@/components/Ornament/ornaments";
@@ -504,41 +504,43 @@ export function VideoBuilder() {
       setGenLogs((prev) => [...prev.slice(-4), stamp(log)]);
     };
 
-    /* ── Cloud-first render, local fallback ──────────────────────
-       On any cloud failure (host asleep, queue full, timeout), we
-       fall through to the in-browser WebCodecs pipeline — generation
-       can never fully die. */
+    /* ── Server-first render, local fallback ─────────────────────
+       The whole render runs in the app's own /api/render functions;
+       the browser never encodes unless the server path fails or the
+       selection exceeds the 10-minute server cap. */
     const cloudHandleRef: { current: { cancel: () => void } | null } = {
       current: null,
     };
 
     const buildCloudSpec = async () => {
-      let bg: { mode: "pexels" | "upload" | "none"; urls?: string[]; uploadId?: string } = {
-        mode: "none",
-      };
+      pushLog({ msg: "Measuring audio…", pct: 1 });
+      const durations = await estimateAyahDurationsSec({
+        ayahs: selectedAyahsData,
+        reciter: selectedReciter,
+        surah: selectedSurah,
+      });
+      if (!durations) throw new Error("Could not measure audio durations");
+
+      const bg: {
+        mode: "pexels" | "upload" | "none";
+        urls?: string[];
+      } = { mode: "none" };
       if (settings.background === "pexels" || settings.background === "library") {
         const urls = settings.videoUrls?.length
           ? settings.videoUrls
           : settings.videoUrl
             ? [settings.videoUrl]
             : [];
-        if (urls.length) bg = { mode: "pexels", urls };
-      } else if (
-        settings.background === "upload" &&
-        settings.uploadedVideoFile instanceof File
-      ) {
-        const uploadId = await uploadBgVideo(settings.uploadedVideoFile, (msg, pct) =>
-          pushLog({ msg, pct }),
-        );
-        if (!uploadId) throw new Error("Background upload failed");
-        bg = { mode: "upload", uploadId };
+        if (urls.length) bg.urls = urls;
       }
-      return {
-        ayahs: selectedAyahsData.map((a) => ({
+
+      const spec = {
+        ayahs: selectedAyahsData.map((a, i) => ({
           key: selectedSurah!.number + ":" + a.numberInSurah,
           numberInSurah: a.numberInSurah,
           text: a.text,
           translation: a.translation ?? "",
+          durationSec: durations[i],
         })),
         surah: {
           number: String(selectedSurah!.number),
@@ -558,30 +560,41 @@ export function VideoBuilder() {
         bg,
         quality: { isLowPower: false },
       };
+
+      if (settings.background === "upload" && settings.uploadedVideoFile instanceof File) {
+        return { ...spec, bg: { mode: "upload" as const } };
+      }
+      return spec;
     };
+
+    const bgUploadFile =
+      settings.background === "upload" && settings.uploadedVideoFile instanceof File
+        ? settings.uploadedVideoFile
+        : null;
 
     try {
       let blob: Blob | null = null;
 
-      if (cloudRenderConfigured()) {
-        try {
-          blob = await renderVideoCloud(
-            await buildCloudSpec(),
-            (msg, pct) => pushLog({ msg, pct }),
-            cloudHandleRef,
-          );
-        } catch (cloudErr: any) {
-          if (cloudErr?.name === "AbortError" || ctrl.signal.aborted) {
-            throw new DOMException("Aborted", "AbortError");
-          }
-          if (!isWebCodecsSupported()) throw cloudErr;
-          // Local pipeline can carry it — note + fall through.
-          pushLog({
-            msg: "Cloud unavailable — rendering on your device…",
-            pct: 0,
-          });
-          blob = null;
+      try {
+        blob = await renderVideoCloud(
+          await buildCloudSpec(),
+          (msg, pct) => pushLog({ msg, pct }),
+          cloudHandleRef,
+          bgUploadFile,
+        );
+      } catch (cloudErr: any) {
+        /* User hit Cancel → honor it; anything else is a server-path
+           failure → fall back to the in-browser pipeline (if capable). */
+        if (ctrl.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
         }
+        if (cloudErr?.name === "AbortError") throw cloudErr;
+        if (!isWebCodecsSupported()) throw cloudErr;
+        pushLog({
+          msg: "Server render unavailable — rendering on your device…",
+          pct: 0,
+        });
+        blob = null;
       }
 
       if (!blob) {
@@ -729,6 +742,15 @@ export function VideoBuilder() {
 
   const showSidePreview =
     step < 4 && !!selectedSurah && selectedAyahsData.length > 0;
+
+  /* Entering the Generate step: drop any render job left behind by a
+     previous session (refresh mid-render). Live renders manage their
+     own cleanup in render-client. */
+  const prevStepRef = useRef(step);
+  useEffect(() => {
+    if (step === 4 && prevStepRef.current !== 4 && !isGenerating) clearStaleJob();
+    prevStepRef.current = step;
+  }, [step, isGenerating]);
 
   return (
     <div className="garden-ground relative min-h-screen overflow-hidden">
