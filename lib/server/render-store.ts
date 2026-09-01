@@ -8,6 +8,11 @@
  *    land on a different function instance.
  *  - Local disk (dev): keeps `next dev` on a laptop fully working
  *    with zero Blob setup.
+ *
+ * Backend selection is LAZY (per-call): Next inlines process.env at
+ * build time for vars present during `next build`, but
+ * VERCEL_OIDC_TOKEN is injected at RUNTIME on Vercel — a module-load
+ * check would freeze the wrong answer into the bundle.
  */
 
 export interface RenderStore {
@@ -19,15 +24,18 @@ export interface RenderStore {
 
 /* Blob is configured via EITHER the classic read-write token OR the
  * newer OIDC pair (VERCEL_OIDC_TOKEN + BLOB_STORE_ID — auto-injected
- * by Vercel when a store is connected). Either means: use Blob. */
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
-const OIDC_PAIR =
-  typeof process.env.VERCEL_OIDC_TOKEN === "string" &&
-  process.env.VERCEL_OIDC_TOKEN.length > 0 &&
-  typeof process.env.BLOB_STORE_ID === "string" &&
-  process.env.BLOB_STORE_ID.length > 0;
-const hasBlob =
-  (typeof BLOB_TOKEN === "string" && BLOB_TOKEN.length > 0) || OIDC_PAIR;
+ * by Vercel when a store is connected). Either means: use Blob.
+ * Evaluated lazily on every call — see header note. */
+function blobConfigured(): boolean {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (typeof token === "string" && token.length > 0) return true;
+  const oidc = process.env.VERCEL_OIDC_TOKEN;
+  const store = process.env.BLOB_STORE_ID;
+  return (
+    typeof oidc === "string" && oidc.length > 0 &&
+    typeof store === "string" && store.length > 0
+  );
+}
 
 /* ── Vercel Blob backend ─────────────────────────────────────────
  * put/get/head/del + list documented at
@@ -130,7 +138,15 @@ function dirnameOf(file: string): string {
   return i > 0 ? file.slice(0, i) : file;
 }
 
-export const renderStore: RenderStore = hasBlob ? new BlobStore() : new DiskStore();
+const blobStore = new BlobStore();
+const diskStore = new DiskStore();
+
+/* Lazily resolved per call — see header note. */
+export const renderStore: RenderStore = new Proxy({} as RenderStore, {
+  get(_t, prop: keyof RenderStore) {
+    return blobConfigured() ? blobStore[prop] : diskStore[prop];
+  },
+});
 
 /* Path scheme — everything lives under `renders/<jobId>/`:
  *   spec.json       the full validated plan (resume + idempotency)
@@ -146,8 +162,5 @@ export const renderPaths = {
 };
 
 export function isStoreConfigured(): boolean {
-  return hasBlob;
+  return blobConfigured();
 }
-
-/* Legacy stores expose a static read-write token; OIDC stores expose
- * the OIDC pair. Either means "Blob storage is live". */
