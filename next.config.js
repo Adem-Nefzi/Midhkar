@@ -11,19 +11,25 @@ module.exports = {
     "ffprobe-static",
   ],
   /* Runtime-loaded binaries the static tracer misses — force them
-   * into the serverless bundle for the routes that spawn them:
-   *  - font TTFs (read at runtime by @napi-rs/canvas registration)
-   *  - ffmpeg-static binary (~78MB static executable — needs
-   *    include; check Vercel's 250MB compressed limit stays OK)
+   * into the serverless bundle for the routes that spawn them.
+   * PLATFORM-SCOPED: Vercel functions are linux/x64 — pulling the
+   * full ffmpeg-static/ffprobe-static globs ships every platform's
+   * binary (~450MB) and blows the 250MB uncompressed function limit.
    * Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/outputFileTracingIncludes */
   outputFileTracingIncludes: {
     "/api/render/chunk": [
       "./lib/server/server-canvas/fonts/**",
-      "./node_modules/ffmpeg-static/**",
-      "./node_modules/ffprobe-static/**",
+      "./node_modules/ffmpeg-static/ffmpeg",
+      "./node_modules/ffmpeg-static/index.js",
+      "./node_modules/ffmpeg-static/package.json",
+      "./node_modules/ffprobe-static/bin/linux/x64/ffprobe",
+      "./node_modules/ffprobe-static/index.js",
+      "./node_modules/ffprobe-static/package.json",
     ],
     "/api/render/finalize": [
-      "./node_modules/ffmpeg-static/**",
+      "./node_modules/ffmpeg-static/ffmpeg",
+      "./node_modules/ffmpeg-static/index.js",
+      "./node_modules/ffmpeg-static/package.json",
     ],
   },
   async headers() {
