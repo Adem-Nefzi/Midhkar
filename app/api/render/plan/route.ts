@@ -143,6 +143,15 @@ export async function POST(request: Request) {
   st.translationOpacity = num(st.translationOpacity, 80, 0, 100);
   st.verseSpacing = num(st.verseSpacing, 0, 0, 3);
   st.bgGradientAngle = num(st.bgGradientAngle, 135, 0, 360);
+  if (!["small", "medium", "large"].includes(String(st.fontSize))) {
+    st.fontSize = "medium";
+  }
+  if (typeof st.fontFamily !== "string" || !st.fontFamily) {
+    st.fontFamily = "'Amiri', serif";
+  }
+  if (typeof st.translationFontFamily !== "string" || !st.translationFontFamily) {
+    st.translationFontFamily = "'Inter', sans-serif";
+  }
   if (typeof st.textColor !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(st.textColor)) {
     st.textColor = "#d4af37";
   }

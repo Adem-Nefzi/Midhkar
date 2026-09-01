@@ -294,6 +294,19 @@ export async function renderChunk(
     translationOpacity: numOr(rawS.translationOpacity, 80),
     verseSpacing: numOr(rawS.verseSpacing, 0),
     bgGradientAngle: numOr(rawS.bgGradientAngle, 135),
+    fontSize: (["small", "medium", "large"] as const).includes(
+      rawS.fontSize as "small" | "medium" | "large",
+    )
+      ? rawS.fontSize
+      : "medium",
+    fontFamily:
+      typeof rawS.fontFamily === "string" && rawS.fontFamily
+        ? rawS.fontFamily
+        : "'Amiri', serif",
+    translationFontFamily:
+      typeof rawS.translationFontFamily === "string" && rawS.translationFontFamily
+        ? rawS.translationFontFamily
+        : "'Inter', sans-serif",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;
