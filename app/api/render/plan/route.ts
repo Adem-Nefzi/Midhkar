@@ -131,6 +131,28 @@ export async function POST(request: Request) {
     return bad("Invalid platform");
   }
 
+  /* Normalize the numeric/color fields the renderer divides or parses —
+   * a missing value must never become NaN inside canvas. */
+  const st = spec.settings as Record<string, unknown>;
+  const num = (v: unknown, def: number, min: number, max: number): number => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
+  };
+  st.bgOverlay = num(st.bgOverlay, 35, 0, 100);
+  st.textOpacity = num(st.textOpacity, 100, 0, 100);
+  st.translationOpacity = num(st.translationOpacity, 80, 0, 100);
+  st.verseSpacing = num(st.verseSpacing, 0, 0, 3);
+  st.bgGradientAngle = num(st.bgGradientAngle, 135, 0, 360);
+  if (typeof st.textColor !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(st.textColor)) {
+    st.textColor = "#d4af37";
+  }
+  if (typeof st.bgColor !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(st.bgColor)) {
+    st.bgColor = "#09090f";
+  }
+  if (typeof st.bgColorSecondary !== "string" || !/^#[0-9a-fA-F]{3,8}$/.test(st.bgColorSecondary)) {
+    st.bgColorSecondary = "#1a0e00";
+  }
+
   const jobId = newJobId();
   const plan: RenderPlan = {
     jobId,

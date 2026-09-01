@@ -280,8 +280,21 @@ export async function renderChunk(
 ): Promise<Buffer> {
   ensureFonts();
   /* The wire settings ARE the app's VideoSettings — the vendor copy
-     expects that exact shape. */
-  const s = spec.settings as unknown as VideoSettings;
+     expects that exact shape. Numeric fields fall back to defaults so
+     a sparse spec can never produce NaN inside canvas ops. */
+  const rawS = spec.settings as unknown as VideoSettings;
+  const numOr = (v: unknown, def: number): number => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : def;
+  };
+  const s: VideoSettings = {
+    ...rawS,
+    bgOverlay: numOr(rawS.bgOverlay, 35),
+    textOpacity: numOr(rawS.textOpacity, 100),
+    translationOpacity: numOr(rawS.translationOpacity, 80),
+    verseSpacing: numOr(rawS.verseSpacing, 0),
+    bgGradientAngle: numOr(rawS.bgGradientAngle, 135),
+  };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;
   const bitrate = videoBitrate(cw, ch, spec.quality.isLowPower);
