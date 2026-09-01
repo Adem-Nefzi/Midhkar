@@ -1,9 +1,9 @@
-/**
- * render-chunk.ts — encodes ONE verse-aligned chunk of a render plan
+﻿/**
+ * render-chunk.ts â€” encodes ONE verse-aligned chunk of a render plan
  * to an H.264/AAC MP4, port of the verified render-service pipeline
  * (cumulative segments, alpha-sum-1 crossfades, bg seams, bitrate
  * ladder, x264 memory-diet profile). Identical encode parameters on
- * every chunk → the MP4s concat losslessly.
+ * every chunk â†’ the MP4s concat losslessly.
  */
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { spawn } from "node:child_process";
@@ -24,14 +24,13 @@ const RENDER_FPS = 30;
 const TRANSITION_WINDOW_FRAMES = 8;
 const BOOKEND_FADE_FRAMES = 6;
 const SEAM_FRAMES = 10;
-const FALLBACK_BG_COLOR = "#0b0b0f";
 const FALLBACK_DUR = 6;
 const SAMPLE_RATE = 48000;
 const AUDIO_BITRATE = 128_000;
 
 type ProgressFn = (msg: string, pct: number) => void;
 
-/* ── Audio (mirrors render-service/src/render.ts) ──────────────── */
+/* â”€â”€ Audio (mirrors render-service/src/render.ts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function audioUrlCandidates(
   reciter: RenderPlanSpec["reciter"],
@@ -67,7 +66,9 @@ async function fetchAudioBuffer(urls: string[]): Promise<Buffer | null> {
   return null;
 }
 
-/** Decode any audio to mono 48kHz f32le PCM. */
+/** Decode any audio to mono 48kHz f32le PCM. Rejects on decode failure
+ *  (non-zero exit / no samples) â€” a silent empty buffer would delete
+ *  that verse's audio and desync the whole video. */
 function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffmpegBin(), [
@@ -88,6 +89,129 @@ function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
       }
     }, 60_000);
     proc.stdout.on("data", (d) => chunks.push(d));
+    let stderr = "";
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+    proc.on("error", (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if ((code ?? -1) !== 0) {
+        reject(new Error(`audio decode failed (${code}): ${stderr.slice(-200)}`));
+        return;
+      }
+      const buf = Buffer.concat(chunks);
+      if (buf.length < 4) {
+        reject(new Error("audio decode produced no samples"));
+        return;
+      }
+      const samples = new Float32Array(buf.length / 4);
+      for (let i = 0; i < samples.length; i++) samples[i] = buf.readFloatLE(i * 4);
+      resolve(samples);
+    });
+    proc.stdin.end(input);
+  });
+}
+
+/* â”€â”€ Bg frames â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * Frames are extracted as JPEG (mjpeg) â€” ~10x smaller than PNG at
+ * 1080Ã—1920 â€” and kept as encoded buffers; they are decoded to RGBA
+ * on demand with a small LRU cache. Storing PNG + pre-decoding every
+ * frame needs multi-GB on a 2GB function.
+ * JPEG streams are parsed on the EOI marker (FFD9), robust to
+ * restart markers. */
+const JPEG_EOI = Buffer.from([0xff, 0xd9]);
+
+function extractBgFrames(
+  input: string | Buffer,
+  cw: number,
+  ch: number,
+  maxFrames: number,
+): Promise<Buffer[]> {
+  const scale = `scale='max(${cw},iw*${ch}/ih)':'max(${ch},ih*${cw}/iw)'`;
+  const inputArgs = typeof input === "string"
+    ? [
+        /* Robust remote fetch: reconnect on mid-stream errors, fail
+         * fast instead of hanging to the 300s function cap. */
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "4",
+        "-rw_timeout", "20000000",
+        "-i", input,
+      ]
+    : ["-i", "pipe:0"];
+  const args = [
+    "-v", "error",
+    ...inputArgs,
+    "-vf", `${scale},crop=${cw}:${ch}`,
+    "-fps_mode", "vfr",
+    "-frames:v", String(maxFrames),
+    "-f", "image2pipe",
+    "-vcodec", "mjpeg",
+    "-q:v", "4",
+    "-",
+  ];
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegBin(), args, { windowsHide: true });
+    const frames: Buffer[] = [];
+    let buf = Buffer.alloc(0);
+    let stderr = "";
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve(frames);
+    };
+    proc.stdout.on("data", (d) => {
+      buf = Buffer.concat([buf, d]);
+      let idx;
+      while ((idx = buf.indexOf(JPEG_EOI)) !== -1) {
+        frames.push(Buffer.from(buf.subarray(0, idx + 2)));
+        buf = buf.subarray(idx + 2);
+      }
+    });
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+    proc.on("error", (e) => finish(new Error("bg frame extraction failed: " + e.message)));
+    proc.on("close", (code) => {
+      /* Exit code is the truth: a 403/timeout/demux failure must NOT
+       * resolve as "0 frames" â€” callers would render black video. */
+      if ((code ?? -1) !== 0) {
+        finish(new Error(`bg extraction failed (${code}): ${stderr.slice(-200)}`));
+        return;
+      }
+      finish();
+    });
+    if (Buffer.isBuffer(input)) proc.stdin.end(input);
+    else proc.stdin.end();
+  });
+}
+
+async function probeDuration(src: string): Promise<number> {
+  const bin = await ffprobeBin();
+  const out = await new Promise<string>((resolve, reject) => {
+    const proc = spawn(bin, [
+      "-v", "error",
+      "-rw_timeout", "20000000",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      src,
+    ], { windowsHide: true });
+    let stdout = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        proc.kill("SIGKILL");
+        reject(new Error("probe timeout"));
+      }
+    }, 25_000);
+    proc.stdout.on("data", (d) => (stdout += d.toString()));
     proc.stderr.on("data", () => {});
     proc.on("error", (e) => {
       if (settled) return;
@@ -99,83 +223,15 @@ function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      const buf = Buffer.concat(chunks);
-      const samples = new Float32Array(buf.length / 4);
-      for (let i = 0; i < samples.length; i++) samples[i] = buf.readFloatLE(i * 4);
-      resolve(samples);
+      resolve(stdout);
     });
-    proc.stdin.end(input);
-  });
-}
-
-/* ── Bg frames (mirrors render-service/src/ffmpeg.ts) ─────────── */
-
-function extractBgFrames(
-  input: string | Buffer,
-  cw: number,
-  ch: number,
-  maxFrames: number,
-): Promise<Buffer[]> {
-  const scale = `scale='max(${cw},iw*${ch}/ih)':'max(${ch},ih*${cw}/iw)'`;
-  const args = [
-    "-v", "error",
-    "-i", typeof input === "string" ? input : "pipe:0",
-    "-vf", `${scale},crop=${cw}:${ch}`,
-    "-fps_mode", "vfr",
-    "-frames:v", String(maxFrames),
-    "-f", "image2pipe",
-    "-vcodec", "png",
-    "-",
-  ];
-  return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegBin(), args, { windowsHide: true });
-    const frames: Buffer[] = [];
-    let buf = Buffer.alloc(0);
-    let settled = false;
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      if (err) reject(err);
-      else resolve(frames);
-    };
-    proc.stdout.on("data", (d) => {
-      buf = Buffer.concat([buf, d]);
-      const IEND = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
-      let idx;
-      while ((idx = buf.indexOf(IEND)) !== -1) {
-        frames.push(Buffer.from(buf.subarray(0, idx + 8)));
-        buf = buf.subarray(idx + 8);
-      }
-    });
-    proc.stderr.on("data", () => {});
-    proc.on("error", (e) => finish(new Error("bg frame extraction failed: " + e.message)));
-    proc.on("close", () => finish());
-    if (Buffer.isBuffer(input)) proc.stdin.end(input);
-    else proc.stdin.end();
-  });
-}
-
-async function probeDuration(src: string): Promise<number> {
-  const bin = await ffprobeBin();
-  const out = await new Promise<string>((resolve, reject) => {
-    const proc = spawn(bin, [
-      "-v", "error",
-      "-show_entries", "format=duration",
-      "-of", "default=noprint_wrappers=1:nokey=1",
-      src,
-    ], { windowsHide: true });
-    let stdout = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", () => {});
-    proc.on("error", reject);
-    proc.on("close", () => resolve(stdout));
   });
   const d = parseFloat(out.trim());
   if (!Number.isFinite(d) || d <= 0) throw new Error(`ffprobe failed for ${src}`);
   return d;
 }
 
-/* ── Binaries ──────────────────────────────────────────────────── */
+/* â”€â”€ Binaries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ffmpegBin(): string {
   return (ffmpegStatic as unknown as string) || "ffmpeg";
@@ -193,7 +249,37 @@ async function ffprobeBin(): Promise<string> {
   return ffprobePath;
 }
 
-/* ── Resolution / bitrate (mirror device-profile) ─────────────── */
+/* Gradient fallback painted under the overlays whenever a bg frame is
+ * missing/un-decodable and when there is no bg video at all â€” kept in
+ * lockstep with the gradient the overlay-baking path uses, so a
+ * dropped bg clip never flashes a different color. */
+function drawFallbackBg(
+  ctx: CanvasRenderingContext2D,
+  cw: number,
+  ch: number,
+  s: VideoSettings,
+): void {
+  const g = ctx.createLinearGradient(0, 0, cw, ch);
+  g.addColorStop(0, "#09090f");
+  g.addColorStop(0.5, "#120d03");
+  g.addColorStop(1, "#09090f");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cw, ch);
+  const glow = ctx.createRadialGradient(
+    cw / 2, ch / 2, 0, cw / 2, ch / 2, Math.max(cw, ch) * 0.55,
+  );
+  glow.addColorStop(0, "rgba(212,175,55,0.07)");
+  glow.addColorStop(1, "transparent");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, cw, ch);
+  const overlay = Number(s?.bgOverlay);
+  if (Number.isFinite(overlay) && overlay > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(1, overlay / 100)})`;
+    ctx.fillRect(0, 0, cw, ch);
+  }
+}
+
+/* â”€â”€ Resolution / bitrate (mirror device-profile) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function outputResolution(aspect: string, isLowPower: boolean) {
   if (isLowPower) {
@@ -216,7 +302,7 @@ function videoBitrate(cw: number, ch: number, isLowPower: boolean) {
   return Math.round(bitrate * (isLowPower ? 0.7 : 1.0));
 }
 
-/* ── Segments / transitions (verbatim from render-service) ────── */
+/* â”€â”€ Segments / transitions (verbatim from render-service) â”€â”€â”€â”€â”€â”€ */
 
 interface Segment {
   totalFrames: number;
@@ -267,7 +353,7 @@ function transitionFor(
   };
 }
 
-/* ── The chunk render ─────────────────────────────────────────── */
+/* â”€â”€ The chunk render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export async function renderChunk(
   spec: RenderPlanSpec,
@@ -279,7 +365,7 @@ export async function renderChunk(
   bgUpload?: Uint8Array | null,
 ): Promise<Buffer> {
   ensureFonts();
-  /* The wire settings ARE the app's VideoSettings — the vendor copy
+  /* The wire settings ARE the app's VideoSettings â€” the vendor copy
      expects that exact shape. Numeric fields fall back to defaults so
      a sparse spec can never produce NaN inside canvas ops. */
   const rawS = spec.settings as unknown as VideoSettings;
@@ -323,9 +409,23 @@ export async function renderChunk(
     const raw = await fetchAudioBuffer(
       audioUrlCandidates(spec.reciter, surahNo, ayahs[i].numberInSurah),
     );
-    const samples = raw
-      ? await decodeAudioPcm(raw)
-      : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
+    if (!raw) {
+      console.warn(
+        `[render] audio fetch failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence`,
+      );
+    }
+    let samples: Float32Array;
+    try {
+      samples = raw
+        ? await decodeAudioPcm(raw)
+        : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
+    } catch (err) {
+      console.warn(
+        `[render] audio decode failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence:`,
+        err instanceof Error ? err.message : err,
+      );
+      samples = new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
+    }
     buffers.push(samples);
     durations.push({ totalSec: samples.length / SAMPLE_RATE, trailSec: verseSpacing });
     onProgress(
@@ -346,19 +446,25 @@ export async function renderChunk(
   /* 2. Segments */
   const { segments, totalFrames } = buildSegments(durations, RENDER_FPS);
 
-  /* 3. Bg playlist frames */
-  onProgress("Preparing background…", 30);
+  /* 3. Bg playlist frames.
+   * Memory-bounded: JPEG-encoded frames only (decoded on demand in
+   * the compositing loop, LRU-cached), hard cap on total stored
+   * frames so a 2GB function never OOMs. A clip that fails to
+   * extract after one retry is DROPPED; if every clip fails, the
+   * overlays bake the gradient fallback (below) â€” never a black
+   * video. hasBgVideo is decided by ACTUAL extracted frames, not by
+   * URL count. */
+  onProgress("Preparing backgroundâ€¦", 30);
   const bgSources: (string | Buffer)[] = bgUpload
     ? [Buffer.from(bgUpload)]
     : spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0
       ? [...(spec.bg.urls ?? [])]
       : [];
-  const hasBgVideo = bgSources.length > 0;
-  const bgDarkenAlpha = hasBgVideo ? Math.min(0.8, (s.bgOverlay as number) / 100) : 0;
+  const BG_HARD_CAP = 900; /* 900 JPEGs @1080Ã—1920 â‰ˆ â‰¤540MB stored */
   const bgFramesList: Buffer[][] = [];
-  if (hasBgVideo) {
+  if (bgSources.length > 0) {
     const cap = spec.quality.isLowPower ? 1200 : 2400;
-    const budget = Math.min(cap * bgSources.length, totalFrames + 64);
+    const budget = Math.min(cap * bgSources.length, totalFrames + 64, BG_HARD_CAP);
     const durations2: number[] = [];
     for (const u of bgSources) {
       if (typeof u === "string") {
@@ -368,7 +474,7 @@ export async function renderChunk(
           durations2.push(0);
         }
       } else {
-        durations2.push(0); // uploaded bytes — even split
+        durations2.push(0); /* uploaded bytes â€” even split */
       }
     }
     const known = durations2.filter((d) => d > 0);
@@ -380,11 +486,32 @@ export async function renderChunk(
     });
     for (let i = 0; i < bgSources.length; i++) {
       if (signal.aborted) throw new Error("Aborted");
-      onProgress(`Decoding backgrounds ${i + 1}/${bgSources.length}…`, 34);
-      bgFramesList.push(await extractBgFrames(bgSources[i], cw, ch, alloc[i]));
+      onProgress(`Decoding backgrounds ${i + 1}/${bgSources.length}â€¦`, 34);
+      let frames: Buffer[] | null = null;
+      for (let attempt = 0; attempt < 2 && !frames; attempt++) {
+        try {
+          frames = await extractBgFrames(bgSources[i], cw, ch, alloc[i]);
+          if (frames.length === 0) frames = null; /* 0 frames = failure */
+        } catch (err) {
+          if (attempt === 1) {
+            console.warn(
+              `[render] bg clip ${i} failed twice â€” dropping:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+      }
+      if (frames && frames.length > 0) bgFramesList.push(frames);
+    }
+    if (bgFramesList.length === 0) {
+      console.warn(
+        `[render] all ${bgSources.length} bg clips failed â€” rendering gradient fallback`,
+      );
     }
   }
   const bgTotal = bgFramesList.reduce((a, f) => a + f.length, 0);
+  const hasBgVideo = bgTotal > 0;
+  const bgDarkenAlpha = hasBgVideo ? Math.min(0.8, (s.bgOverlay as number) / 100) : 0;
 
   /* 4. Overlays */
   const surah = {
@@ -446,7 +573,7 @@ export async function renderChunk(
   }
 
   /* 5. Composite + encode via FFmpeg pipe */
-  onProgress("Encoding chunk…", 48);
+  onProgress("Encoding chunkâ€¦", 48);
   const x264Level = cw * ch >= 2073600 ? "4.0" : cw * ch >= 1166400 ? "3.2" : "3.1";
   const outPath = join(
     tmpdir(),
@@ -512,25 +639,37 @@ export async function renderChunk(
     cctx.globalAlpha = 1;
   };
 
-  /* Pre-decode bg PNGs to images (once) */
-  const bgDecodedImages: (Awaited<ReturnType<typeof loadImage>> | null)[][] = [];
-  if (hasBgVideo) {
-    for (let clip = 0; clip < bgFramesList.length; clip++) {
-      const imgs: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
-      for (const f of bgFramesList[clip]) {
-        if (signal.aborted) throw new Error("Aborted");
-        try {
-          imgs.push(await loadImage(f));
-        } catch {
-          imgs.push(null);
-        }
-      }
-      bgDecodedImages.push(imgs);
+  /* On-demand bg JPEG decode with a small LRU cache â€” NEVER hold all
+   * frames decoded (RGBA @1080Ã—1920 â‰ˆ 8.3MB each; 900 would be 7.5GB).
+   * Cache covers the seam-lookahead window (current + next clip's
+   * first frame + a working set of recently used frames). */
+  const BG_CACHE_SIZE = 24;
+  const bgCache = new Map<string, Awaited<ReturnType<typeof loadImage>>>();
+  const bgDecode = async (clip: number, local: number) => {
+    const key = `${clip}:${local}`;
+    const hit = bgCache.get(key);
+    if (hit) {
+      bgCache.delete(key);
+      bgCache.set(key, hit); /* LRU refresh */
+      return hit;
     }
-  }
+    let img: Awaited<ReturnType<typeof loadImage>> | null = null;
+    try {
+      img = await loadImage(bgFramesList[clip][local]);
+    } catch {
+      img = null;
+    }
+    if (img) {
+      bgCache.set(key, img);
+      if (bgCache.size > BG_CACHE_SIZE) {
+        const oldest = bgCache.keys().next().value;
+        if (oldest !== undefined) bgCache.delete(oldest);
+      }
+    }
+    return img;
+  };
 
   const transitionStyle = s.transitionStyle as string;
-  const frameDouble = Math.round(outputFps / RENDER_FPS);
   const isFirstChild = chunkIndex === 0;
   const isLastChild = chunkIndex === chunkCount - 1;
 
@@ -544,41 +683,56 @@ export async function renderChunk(
 
       if (hasBgVideo) {
         const g = segStart + k;
-        const idx = g % bgTotal;
-        let pos = idx;
+        /* bgTotal > 0 here (hasBgVideo is derived from it) â€” the
+         * modulo is safe. A failed decode draws the gradient. */
+        let pos = g % bgTotal;
         let clip = 0;
         let local = 0;
-        for (let i = 0; i < bgDecodedImages.length; i++) {
-          if (pos < bgDecodedImages[i].length) { clip = i; local = pos; break; }
-          pos -= bgDecodedImages[i].length;
+        let found = false;
+        for (let i = 0; i < bgFramesList.length; i++) {
+          if (pos < bgFramesList[i].length) {
+            clip = i;
+            local = pos;
+            found = true;
+            break;
+          }
+          pos -= bgFramesList[i].length;
         }
-        const imgs = bgDecodedImages[clip];
-        const img = imgs[local] ?? null;
+        if (!found) {
+          /* Index arithmetic gone wrong â€” paint gradient, never NaN. */
+          clip = bgFramesList.length - 1;
+          local = bgFramesList[clip].length - 1;
+        }
+        const imgs = bgFramesList[clip];
+        const img = await bgDecode(clip, local);
         if (img) {
           cctx.drawImage(img, 0, 0, cw, ch);
           const intoSeam = imgs.length - local;
-          const nextClip = clip + 1 < bgDecodedImages.length ? clip + 1 : 0;
-          const next = bgDecodedImages[nextClip][0] ?? null;
+          const nextClip = clip + 1 < bgFramesList.length ? clip + 1 : 0;
           if (
-            next &&
             transitionStyle !== "none" &&
-            intoSeam <= SEAM_FRAMES
+            intoSeam <= SEAM_FRAMES &&
+            bgFramesList[nextClip].length > 0
           ) {
-            const t = (SEAM_FRAMES - intoSeam + 1) / (SEAM_FRAMES + 1);
-            if (t < 1) {
-              cctx.globalAlpha = Math.min(1, t);
-              cctx.drawImage(next, 0, 0, cw, ch);
-              cctx.globalAlpha = 1;
+            const next = await bgDecode(nextClip, 0);
+            if (next) {
+              const t = (SEAM_FRAMES - intoSeam + 1) / (SEAM_FRAMES + 1);
+              if (t < 1) {
+                cctx.globalAlpha = Math.min(1, t);
+                cctx.drawImage(next, 0, 0, cw, ch);
+                cctx.globalAlpha = 1;
+              }
             }
           }
         } else {
-          cctx.fillStyle = FALLBACK_BG_COLOR;
-          cctx.fillRect(0, 0, cw, ch);
+          drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch, s);
         }
         if (bgDarkenAlpha > 0) {
           cctx.fillStyle = `rgba(0,0,0,${bgDarkenAlpha})`;
           cctx.fillRect(0, 0, cw, ch);
         }
+      } else {
+        drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch, s);
       }
 
       const localEnd = seg.totalFrames - 1;
@@ -597,7 +751,7 @@ export async function renderChunk(
         }
       }
 
-      /* Bookend fades only at the true start/end of the whole video —
+      /* Bookend fades only at the true start/end of the whole video â€”
          chunk seams stay flat or the seams would visibly pulse. */
       let bookend = 1;
       if (transitionStyle !== "none") {
@@ -625,12 +779,16 @@ export async function renderChunk(
         drawWatermark(cctx as unknown as CanvasRenderingContext2D, cw, ch, s.watermarkText);
       }
 
+      /* A/V SYNC: write each unique frame ONCE. The rawvideo input is
+       * declared RENDER_FPS (30) and the output -r outputFps (60) â€”
+       * ffmpeg's frame duplication produces the 60fps track with EXACT
+       * timestamps. Manually writing each frame twice (the old code)
+       * declared 2x frames to a 30fps stdin, doubling video duration
+       * vs audio (verified experimentally: 20s video / 10s audio). */
       const frameBuf = (composite as unknown as { data(): Buffer }).data();
-      for (let d = 0; d < frameDouble; d++) {
-        const ok = proc.stdin.write(frameBuf);
-        if (!ok) {
-          await new Promise<void>((res) => proc.stdin.once("drain", () => res()));
-        }
+      const ok = proc.stdin.write(frameBuf);
+      if (!ok) {
+        await new Promise<void>((res) => proc.stdin.once("drain", () => res()));
       }
 
       const globalIdx = segStart + k;
@@ -646,7 +804,7 @@ export async function renderChunk(
 
   proc.stdin.end();
 
-  onProgress("Finalising…", 94);
+  onProgress("Finalisingâ€¦", 94);
   let stderrAll = "";
   proc.stderr.on("data", (d) => (stderrAll += d.toString()));
   const code: number = await new Promise((resolve) => {
