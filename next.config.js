@@ -10,13 +10,21 @@ module.exports = {
     "ffmpeg-static",
     "ffprobe-static",
   ],
-  /* Font binaries are read at runtime (not imported), so the static
-   * tracer misses them — force-include them in the serverless bundle
-   * for every route that renders chunks.
+  /* Runtime-loaded binaries the static tracer misses — force them
+   * into the serverless bundle for the routes that spawn them:
+   *  - font TTFs (read at runtime by @napi-rs/canvas registration)
+   *  - ffmpeg-static binary (~78MB static executable — needs
+   *    include; check Vercel's 250MB compressed limit stays OK)
    * Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/outputFileTracingIncludes */
   outputFileTracingIncludes: {
-    "/api/render/chunk": ["./lib/server/server-canvas/fonts/**"],
-    "/api/cron/cleanup": [],
+    "/api/render/chunk": [
+      "./lib/server/server-canvas/fonts/**",
+      "./node_modules/ffmpeg-static/**",
+      "./node_modules/ffprobe-static/**",
+    ],
+    "/api/render/finalize": [
+      "./node_modules/ffmpeg-static/**",
+    ],
   },
   async headers() {
     return [
