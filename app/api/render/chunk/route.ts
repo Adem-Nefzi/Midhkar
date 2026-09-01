@@ -1,11 +1,11 @@
-/**
+﻿/**
  * POST /api/render/chunk — renders ONE verse-aligned chunk of a plan
  * and stores it as chunk-N.mp4. Idempotent: an existing chunk returns
  * immediately, so client retries and refresh-resume are safe.
  */
 import { NextResponse } from "next/server";
 import { TokenBucketLimiter, getClientIp } from "@/lib/rate-limit";
-import type { RenderPlan } from "@/lib/render-plan";
+import { JOB_ID_RE, type RenderPlan } from "@/lib/render-plan";
 import { renderStore, renderPaths } from "@/lib/server/render-store";
 import { renderChunk } from "@/lib/server/render-chunk";
 
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   } catch {
     return bad("Invalid body");
   }
-  if (!/^[0-9a-z]{27,}$/.test(jobId) || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+  if (!JOB_ID_RE.test(jobId) || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
     return bad("Invalid job");
   }
 
@@ -54,15 +54,20 @@ export async function POST(request: Request) {
     if (!bgUpload) return bad("Background video missing", 410);
   }
 
-  const buffer = await renderChunk(
-    plan.spec,
-    plan.chunks[chunkIndex],
-    chunkIndex,
-    plan.chunks.length,
-    () => {},
-    AbortSignal.timeout(280_000),
-  );
-
-  await renderStore.put(renderPaths.chunk(jobId, chunkIndex), new Uint8Array(buffer));
+  try {
+    const buffer = await renderChunk(
+      plan.spec,
+      plan.chunks[chunkIndex],
+      chunkIndex,
+      plan.chunks.length,
+      () => {},
+      AbortSignal.timeout(280_000),
+    );
+    await renderStore.put(renderPaths.chunk(jobId, chunkIndex), new Uint8Array(buffer));
+  } catch (err) {
+    /* Generic message — never leak ffmpeg stderr / stack to client. */
+    console.error(`[render] chunk ${chunkIndex} of ${jobId} failed:`, err);
+    return bad("Chunk render failed — please try again", 500);
+  }
   return NextResponse.json({ ok: true });
 }

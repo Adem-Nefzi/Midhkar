@@ -5,7 +5,7 @@
  * catches abandoned ones.
  */
 import { NextResponse } from "next/server";
-import { jobIdToTimestamp } from "@/lib/render-plan";
+import { jobIdToTimestamp, JOB_ID_RE } from "@/lib/render-plan";
 import { isStoreConfigured, renderStore } from "@/lib/server/render-store";
 
 export const runtime = "nodejs";
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const page = await list({ prefix: "renders/", cursor });
     for (const b of page.blobs) {
       const m = b.pathname.match(/^renders\/([0-9a-z]{27,})\//);
-      if (m && jobIdToTimestamp(m[1]) < cutoff) jobs.add(m[1]);
+      if (m && JOB_ID_RE.test(m[1]) && jobIdToTimestamp(m[1]) < cutoff) jobs.add(m[1]);
     }
     cursor = page.cursor;
   } while (cursor);

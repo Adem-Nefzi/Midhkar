@@ -44,6 +44,9 @@ export interface RenderPlan {
 const MAX_CHUNK_SEC = 55;
 export const MAX_TOTAL_SEC = 10 * 60;
 
+/** jobId charset + length — the single source of truth for validation. */
+export const JOB_ID_RE = /^[0-9a-z]{27,}$/;
+
 export function planChunks(ayahs: PlanAyah[], verseSpacingSec: number): RenderChunk[] {
   const chunks: RenderChunk[] = [];
   let from = 0;
@@ -61,15 +64,29 @@ export function planChunks(ayahs: PlanAyah[], verseSpacingSec: number): RenderCh
   return chunks;
 }
 
+/* ── Job IDs ──────────────────────────────────────────────────────
+ * A jobId is a capability token: knowing it grants download/delete.
+ * Randomness comes from crypto when available (all Node runtimes);
+ * Math.random is a last-resort fallback for non-secure contexts.
+ * Layout: 22 random chars + 8 timestamp chars (base36, ms epoch). */
+const ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+function secureRandomInts(count: number): number[] {
+  const g = globalThis as { crypto?: { getRandomValues(a: Uint32Array): Uint32Array } };
+  if (g.crypto?.getRandomValues) {
+    return Array.from(g.crypto.getRandomValues(new Uint32Array(count)));
+  }
+  return Array.from({ length: count }, () => Math.floor(Math.random() * 0xffffffff));
+}
+
 export function newJobId(): string {
-  const c = "abcdef0123456789";
   let id = "";
-  for (let i = 0; i < 24; i++) id += c[Math.floor(Math.random() * c.length)];
+  for (const r of secureRandomInts(22)) id += ID_ALPHABET[r % ID_ALPHABET.length];
   return id + Date.now().toString(36);
 }
 
 /** Decode a jobId's embedded creation time (ms since epoch). */
 export function jobIdToTimestamp(jobId: string): number {
-  const ts = parseInt(jobId.slice(24), 36);
+  const ts = parseInt(jobId.slice(22), 36);
   return Number.isFinite(ts) ? ts : 0;
 }

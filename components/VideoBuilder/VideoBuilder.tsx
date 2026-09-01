@@ -588,7 +588,15 @@ export function VideoBuilder() {
         if (ctrl.signal.aborted) {
           throw new DOMException("Aborted", "AbortError");
         }
-        if (cloudErr?.name === "AbortError") throw cloudErr;
+        /* A server-side TIMEOUT must not look like user cancel —
+           AbortSignal-abort() from our own timer carries
+           TimeoutError/message tag, fall through to local render. */
+        if (
+          cloudErr?.name === "AbortError" &&
+          cloudErr?.message !== "midhkar-cloud-timeout"
+        ) {
+          throw cloudErr;
+        }
         if (!isWebCodecsSupported()) throw cloudErr;
         pushLog({
           msg: "Server render unavailable — rendering on your device…",

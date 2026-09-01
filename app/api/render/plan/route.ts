@@ -9,6 +9,7 @@ import {
   planChunks,
   newJobId,
   MAX_TOTAL_SEC,
+  JOB_ID_RE,
   type RenderPlan,
   type RenderPlanSpec,
 } from "@/lib/render-plan";
@@ -21,9 +22,28 @@ export const maxDuration = 60;
 const perIp = new TokenBucketLimiter(4, 2 / 60);
 const MAX_BG_BYTES = 100 * 1024 * 1024;
 const MAX_AYAHS = 400;
+const MAX_SPEC_BYTES = 512 * 1024;
+const MAX_BG_URLS = 6;
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
+}
+
+/** SSRF guard: only allowlisted public CDNs for bg video URLs. */
+function safeBgUrl(raw: unknown): boolean {
+  if (typeof raw !== "string" || raw.length > 2048) return false;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  if (url.username || url.password) return false;
+  if (url.hostname === "videos.pexels.com" || url.hostname.endsWith(".pexels.com")) {
+    return true;
+  }
+  return false;
 }
 
 export async function POST(request: Request) {
@@ -34,13 +54,16 @@ export async function POST(request: Request) {
   }
 
   /* Dev fallback: multipart with an existing jobId stores the bg
-     file for that job (client uploads go browser→Blob in prod). */
+   * file for that job (client uploads go browser→Blob in prod).
+   * Prod (VERCEL env or NODE_ENV=production) must never accept it. */
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) {
+    const isDev = process.env.NODE_ENV !== "production" && !process.env.VERCEL;
+    if (!isDev) return bad("Not found", 404);
     const form = await request.formData();
     const jobId = String(form.get("jobId") ?? "");
     const bg = form.get("bg");
-    if (!/^[0-9a-z]{27,}$/.test(jobId) || !(bg instanceof File)) {
+    if (!JOB_ID_RE.test(jobId) || !(bg instanceof File)) {
       return bad("Invalid upload");
     }
     if (bg.size > MAX_BG_BYTES) return bad("Background video too large (max 100MB)", 413);
@@ -49,6 +72,9 @@ export async function POST(request: Request) {
     await renderStore.put(renderPaths.bgUpload(jobId), new Uint8Array(await bg.arrayBuffer()));
     return NextResponse.json({ ok: true });
   }
+
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_SPEC_BYTES) return bad("Spec too large", 413);
 
   let spec: RenderPlanSpec;
   try {
@@ -60,16 +86,39 @@ export async function POST(request: Request) {
   /* Validation */
   if (!spec?.ayahs?.length) return bad("No ayahs selected");
   if (spec.ayahs.length > MAX_AYAHS) return bad("Too many ayahs");
-  if (!spec.surah?.number || !spec.reciter?.quranApiNo) return bad("Invalid spec");
-  if (spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 6) {
-    return bad("Too many background videos");
+  if (!spec.surah?.number || !/^\d{1,3}$/.test(spec.surah.number)) {
+    return bad("Invalid spec");
   }
+  if (
+    !Number.isInteger(spec.reciter?.quranApiNo) ||
+    spec.reciter.quranApiNo < 1 ||
+    spec.reciter.quranApiNo > 300
+  ) {
+    return bad("Invalid reciter");
+  }
+  if (
+    typeof spec.reciter.everyayahFolder !== "string" ||
+    !/^[A-Za-z0-9_\-/.]{0,120}$/.test(spec.reciter.everyayahFolder)
+  ) {
+    return bad("Invalid reciter");
+  }
+  if (spec.bg.mode === "pexels") {
+    const urls = spec.bg.urls ?? [];
+    if (urls.length > MAX_BG_URLS) return bad("Too many background videos");
+    for (const u of urls) {
+      if (!safeBgUrl(u)) return bad("Invalid background URL");
+    }
+  }
+  /* bg.mode === "upload" is fine: the FILE arrives via /upload-token
+   * (prod client-upload) or the dev multipart branch above — never
+   * inline in the spec body. */
   const verseSpacing = Number((spec.settings as Record<string, unknown>)?.verseSpacing ?? 0);
   if (!(verseSpacing >= 0 && verseSpacing <= 3)) return bad("Invalid verse spacing");
   for (const a of spec.ayahs) {
     if (!a.key || !a.text || !(a.durationSec > 0 && a.durationSec < 120)) {
       return bad("Invalid ayah durations");
     }
+    if (a.key.length > 12) return bad("Invalid ayah key");
   }
   const totalDur = spec.ayahs.reduce(
     (s, a) => s + a.durationSec + verseSpacing,
@@ -91,10 +140,14 @@ export async function POST(request: Request) {
     createdAt: Date.now(),
   };
 
-  await renderStore.put(
-    renderPaths.spec(jobId),
-    new Uint8Array(Buffer.from(JSON.stringify(plan), "utf-8")),
-  );
+  try {
+    await renderStore.put(
+      renderPaths.spec(jobId),
+      new Uint8Array(Buffer.from(JSON.stringify(plan), "utf-8")),
+    );
+  } catch {
+    return bad("Could not create job — try again shortly", 503);
+  }
 
   return NextResponse.json({
     jobId,

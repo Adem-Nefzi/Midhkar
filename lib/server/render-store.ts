@@ -2,11 +2,12 @@
  * render-store.ts — chunk storage for the serverless render pipeline.
  *
  * Two backends behind one interface:
- *  - Vercel Blob (production): BLOB_READ_WRITE_TOKEN present. Blob paths
- *    are the only cross-invocation state — every chunk/finalize call may
+ *  - Vercel Blob (production): OIDC pair (VERCEL_OIDC_TOKEN +
+ *    BLOB_STORE_ID) or legacy BLOB_READ_WRITE_TOKEN. Blob paths are
+ *    the only cross-invocation state — every chunk/finalize call may
  *    land on a different function instance.
- *  - Local disk (dev): keeps `next dev` on a laptop fully working with
- *    zero Blob setup.
+ *  - Local disk (dev): keeps `next dev` on a laptop fully working
+ *    with zero Blob setup.
  */
 
 export interface RenderStore {
@@ -16,8 +17,17 @@ export interface RenderStore {
   delete(prefix: string): Promise<void>;
 }
 
+/* Blob is configured via EITHER the classic read-write token OR the
+ * newer OIDC pair (VERCEL_OIDC_TOKEN + BLOB_STORE_ID — auto-injected
+ * by Vercel when a store is connected). Either means: use Blob. */
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
-const hasBlob = typeof BLOB_TOKEN === "string" && BLOB_TOKEN.length > 0;
+const OIDC_PAIR =
+  typeof process.env.VERCEL_OIDC_TOKEN === "string" &&
+  process.env.VERCEL_OIDC_TOKEN.length > 0 &&
+  typeof process.env.BLOB_STORE_ID === "string" &&
+  process.env.BLOB_STORE_ID.length > 0;
+const hasBlob =
+  (typeof BLOB_TOKEN === "string" && BLOB_TOKEN.length > 0) || OIDC_PAIR;
 
 /* ── Vercel Blob backend ─────────────────────────────────────────
  * put/get/head/del + list documented at
@@ -56,8 +66,18 @@ class BlobStore implements RenderStore {
   }
 
   async exists(path: string): Promise<boolean> {
-    const { head } = await import("@vercel/blob");
-    return (await head(path)) !== null;
+    /* head() throws BlobNotFoundError when missing — it never returns
+     * null (only get() does). Verify + treat not_found as false. */
+    const { head, BlobNotFoundError } = await import("@vercel/blob");
+    try {
+      await head(path);
+      return true;
+    } catch (err) {
+      if (err instanceof BlobNotFoundError) return false;
+      const code = (err as { code?: string }).code;
+      if (code === "not_found" || code === "forbidden") return false;
+      throw err;
+    }
   }
 
   async delete(prefix: string): Promise<void> {
@@ -128,3 +148,6 @@ export const renderPaths = {
 export function isStoreConfigured(): boolean {
   return hasBlob;
 }
+
+/* Legacy stores expose a static read-write token; OIDC stores expose
+ * the OIDC pair. Either means "Blob storage is live". */

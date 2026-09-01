@@ -23,6 +23,7 @@ interface JobState {
   jobId: string;
   chunks: number;
   specHash: string;
+  savedAt?: number;
 }
 
 function loadJob(): JobState | null {
@@ -36,7 +37,7 @@ function loadJob(): JobState | null {
 
 function saveJob(state: JobState | null): void {
   try {
-    if (state) sessionStorage.setItem(JOB_KEY, JSON.stringify(state));
+    if (state) sessionStorage.setItem(JOB_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
     else sessionStorage.removeItem(JOB_KEY);
   } catch {
     /* private mode — resume just won't survive refresh */
@@ -58,20 +59,42 @@ async function deleteJob(jobId: string): Promise<void> {
   );
 }
 
-/** Abandoned-job hygiene when the Generate step mounts. */
+/** Abandoned-job hygiene when the Generate step mounts. Only wipes
+ * jobs older than 1h — a mid-render refresh keeps its chunks so
+ * "Generate" resumes instead of re-rendering everything. */
+const STALE_MS = 60 * 60 * 1000;
 export function clearStaleJob(): void {
   const job = loadJob();
-  if (job) void deleteJob(job.jobId);
-  saveJob(null);
+  if (job) {
+    if (Date.now() - (job.savedAt ?? 0) > STALE_MS) {
+      void deleteJob(job.jobId);
+      saveJob(null);
+    }
+  } else {
+    saveJob(null);
+  }
 }
 
 /* Composite abort (timer + user signal) without AbortSignal.any —
- * the cloud path is the ONLY path on browsers too old for it. */
+ * the cloud path is the ONLY path on browsers too old for it.
+ * Timeouts abort with message "midhkar-cloud-timeout" + TimeoutError
+ * name so VideoBuilder can tell them from user cancels. */
+const TIMEOUT_TAG = "midhkar-cloud-timeout";
+
 function withTimeout(signal: AbortSignal, ms: number): AbortSignal {
   const composite = new AbortController();
-  const onAbort = () => composite.abort();
+  const onAbort = () => {
+    /* Propagate the user's reason verbatim; plain AbortError if none. */
+    composite.abort(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("Aborted", "AbortError"),
+    );
+  };
   signal.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => composite.abort(), ms);
+  const timer = setTimeout(() => {
+    composite.abort(new DOMException(TIMEOUT_TAG, "TimeoutError"));
+  }, ms);
   composite.signal.addEventListener(
     "abort",
     () => {
@@ -128,8 +151,8 @@ async function uploadBgFile(
 ): Promise<void> {
   onLog("Uploading background video…", 3);
   try {
-    const { upload } = await import("@vercel/blob/client");
-    await upload(`renders/${jobId}/bg-input.mp4`, file, {
+    const { uploadPresigned } = await import("@vercel/blob/client");
+    await uploadPresigned(`renders/${jobId}/bg-input.mp4`, file, {
       access: "private",
       handleUploadUrl: `${API}/upload-token`,
       multipart: true,
@@ -193,14 +216,17 @@ export async function renderVideoCloud(
             finalized: boolean;
           };
           job = { jobId: s.jobId, chunks: s.chunks, specHash };
+          saveJob(job);
           onLog("Resuming previous render…", 5);
         }
-      } catch {
+      } catch (err) {
+        if (ctrl.signal.aborted) throw err;
         /* stale entry — fall through to a fresh plan */
       }
     }
     if (previous && (!job || job.jobId !== previous.jobId)) {
       void deleteJob(previous.jobId);
+      saveJob(null);
     }
     if (!job) {
       onLog("Preparing server render…", 2);
@@ -220,7 +246,6 @@ export async function renderVideoCloud(
         4,
       );
     }
-
     /* 1b. Background upload (upload mode) — browser → Blob direct. */
     if (bgFile) {
       await uploadBgFile(job.jobId, bgFile, onLog, ctrl.signal);

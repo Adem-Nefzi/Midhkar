@@ -4,6 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { TokenBucketLimiter, getClientIp } from "@/lib/rate-limit";
+import { JOB_ID_RE } from "@/lib/render-plan";
 import { renderStore, renderPaths } from "@/lib/server/render-store";
 
 export const runtime = "nodejs";
@@ -16,8 +17,8 @@ function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-function validJob(jobId: string | null): boolean {
-  return !!jobId && /^[0-9a-z]{27,}$/.test(jobId);
+function validJob(jobId: string | null): jobId is string {
+  return !!jobId && JOB_ID_RE.test(jobId);
 }
 
 export async function GET(request: Request) {
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   const jobId = new URL(request.url).searchParams.get("jobId");
   if (!validJob(jobId)) return bad("Invalid job");
 
-  const bytes = await renderStore.get(renderPaths.final(jobId!));
+  const bytes = await renderStore.get(renderPaths.final(jobId));
   if (!bytes) return bad("Video not ready", 404);
 
   return new NextResponse(Buffer.from(bytes), {
@@ -48,6 +49,8 @@ export async function DELETE(request: Request) {
   const jobId = new URL(request.url).searchParams.get("jobId");
   if (!validJob(jobId)) return bad("Invalid job");
 
-  await renderStore.delete(`renders/${jobId}/`);
+  await renderStore.delete(`renders/${jobId}/`).catch((err) => {
+    console.error(`[render] delete ${jobId} failed:`, err);
+  });
   return NextResponse.json({ ok: true });
 }

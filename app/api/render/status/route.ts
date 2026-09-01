@@ -3,15 +3,23 @@
  * refresh-resume: the client re-opens where it left off.
  */
 import { NextResponse } from "next/server";
+import { TokenBucketLimiter, getClientIp } from "@/lib/rate-limit";
+import { JOB_ID_RE, type RenderPlan } from "@/lib/render-plan";
 import { renderStore, renderPaths } from "@/lib/server/render-store";
-import type { RenderPlan } from "@/lib/render-plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const perIp = new TokenBucketLimiter(30, 10 / 60);
+
 export async function GET(request: Request) {
+  const ip = getClientIp(request);
+  if (!perIp.consume(ip).allowed) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   const jobId = new URL(request.url).searchParams.get("jobId");
-  if (!jobId || !/^[0-9a-z]{27,}$/.test(jobId)) {
+  if (!jobId || !JOB_ID_RE.test(jobId)) {
     return NextResponse.json({ error: "Invalid job" }, { status: 400 });
   }
 

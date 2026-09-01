@@ -10,7 +10,7 @@ import { readFile, writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegStatic from "ffmpeg-static";
-import type { RenderPlan } from "@/lib/render-plan";
+import { JOB_ID_RE, type RenderPlan } from "@/lib/render-plan";
 import { renderStore, renderPaths } from "@/lib/server/render-store";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   } catch {
     return bad("Invalid body");
   }
-  if (!/^[0-9a-z]{27,}$/.test(jobId)) return bad("Invalid job");
+  if (!JOB_ID_RE.test(jobId)) return bad("Invalid job");
 
   if (await renderStore.exists(renderPaths.final(jobId))) {
     return NextResponse.json({ ok: true, cached: true });
@@ -86,7 +86,8 @@ export async function POST(request: Request) {
     await renderStore.put(renderPaths.final(jobId), new Uint8Array(final));
     return NextResponse.json({ ok: true, sizeBytes: final.length });
   } catch (err) {
-    return bad(err instanceof Error ? err.message : "Finalize failed", 500);
+    console.error(`[render] finalize ${jobId} failed:`, err);
+    return bad("Finalize failed — please try again", 500);
   } finally {
     for (const p of [listPath, outPath]) {
       await unlink(p).catch(() => {});
