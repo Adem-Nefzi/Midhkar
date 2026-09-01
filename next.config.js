@@ -10,6 +10,14 @@ module.exports = {
     "ffmpeg-static",
     "ffprobe-static",
   ],
+  /* Font binaries are read at runtime (not imported), so the static
+   * tracer misses them — force-include them in the serverless bundle
+   * for every route that renders chunks.
+   * Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/outputFileTracingIncludes */
+  outputFileTracingIncludes: {
+    "/api/render/chunk": ["./lib/server/server-canvas/fonts/**"],
+    "/api/cron/cleanup": [],
+  },
   async headers() {
     return [
       {
