@@ -1,17 +1,17 @@
-/**
- * render-store.ts — chunk storage for the serverless render pipeline.
+﻿/**
+ * render-store.ts â€” chunk storage for the serverless render pipeline.
  *
  * Two backends behind one interface:
  *  - Vercel Blob (production): OIDC pair (VERCEL_OIDC_TOKEN +
  *    BLOB_STORE_ID) or legacy BLOB_READ_WRITE_TOKEN. Blob paths are
- *    the only cross-invocation state — every chunk/finalize call may
+ *    the only cross-invocation state â€” every chunk/finalize call may
  *    land on a different function instance.
  *  - Local disk (dev): keeps `next dev` on a laptop fully working
  *    with zero Blob setup.
  *
  * Backend selection is LAZY (per-call): Next inlines process.env at
  * build time for vars present during `next build`, but
- * VERCEL_OIDC_TOKEN is injected at RUNTIME on Vercel — a module-load
+ * VERCEL_OIDC_TOKEN is injected at RUNTIME on Vercel â€” a module-load
  * check would freeze the wrong answer into the bundle.
  */
 
@@ -23,24 +23,62 @@ export interface RenderStore {
 }
 
 /* Blob is configured via EITHER the classic read-write token OR the
- * newer OIDC pair (VERCEL_OIDC_TOKEN + BLOB_STORE_ID — auto-injected
- * by Vercel when a store is connected). Either means: use Blob.
- * Evaluated lazily on every call — see header note. */
-function blobConfigured(): boolean {
+ * newer OIDC pair. Either means: use Blob. Evaluated lazily on every
+ * call â€” Next inlines build-time env vars, but VERCEL_OIDC_TOKEN is
+ * runtime-injected on Vercel (functions receive it as the
+ * x-vercel-oidc-token request HEADER; the SDK resolves it per call).
+ *
+ * In Vercel Functions process.env.VERCEL_OIDC_TOKEN is empty â€” the
+ * token arrives via request context â€” so there, BLOB_STORE_ID alone
+ * (a project env var present iff a store is connected) is the signal.
+ * Locally, env-pulled VERCEL_* vars can't be trusted to discriminate
+ * dev-vs-deployed, so we PROBE the store once per instance: a cheap
+ * head() that returns not_found proves credentials+store are live. */
+function blobEnvConfigured(): boolean {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (typeof token === "string" && token.length > 0) return true;
-  const oidc = process.env.VERCEL_OIDC_TOKEN;
   const store = process.env.BLOB_STORE_ID;
-  return (
-    typeof oidc === "string" && oidc.length > 0 &&
-    typeof store === "string" && store.length > 0
-  );
+  if (typeof store !== "string" || store.length === 0) return false;
+  const oidc = process.env.VERCEL_OIDC_TOKEN;
+  return typeof oidc === "string" && oidc.length > 0;
 }
 
-/* ── Vercel Blob backend ─────────────────────────────────────────
+/* Probe result cached per lambda instance (module scope). */
+let blobProbe: Promise<boolean> | null = null;
+async function blobProbeOnce(): Promise<boolean> {
+  if (!blobProbe) {
+    blobProbe = (async () => {
+      try {
+        const { head } = await import("@vercel/blob");
+        await head("renders/probe-store-availability");
+        return true; /* exists â€” fine, still proves auth works */
+      } catch (err) {
+        if (err instanceof Error) {
+          const name = err.constructor?.name ?? "";
+          if (name === "BlobNotFoundError") return true;
+          if (name === "BlobAccessError" || name === "BlobOidcEnvironmentNotAllowedError") return false;
+          if (name === "BlobStoreNotFoundError" || name === "BlobError") return false;
+        }
+        return false; /* unknown auth/store failure â€” disk is safer */
+      }
+    })();
+  }
+  return blobProbe;
+}
+
+async function shouldUseBlob(): Promise<boolean> {
+  if (blobEnvConfigured()) return true;
+  const store = process.env.BLOB_STORE_ID;
+  if (typeof store === "string" && store.length > 0) {
+    return blobProbeOnce();
+  }
+  return false;
+}
+
+/* â”€â”€ Vercel Blob backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * put/get/head/del + list documented at
  * https://vercel.com/docs/vercel-blob/using-blob-sdk (access required:
- * 'private' — files are delivered only through our routes). */
+ * 'private' â€” files are delivered only through our routes). */
 class BlobStore implements RenderStore {
   async put(path: string, data: Uint8Array): Promise<void> {
     const { put } = await import("@vercel/blob");
@@ -74,7 +112,7 @@ class BlobStore implements RenderStore {
   }
 
   async exists(path: string): Promise<boolean> {
-    /* head() throws BlobNotFoundError when missing — it never returns
+    /* head() throws BlobNotFoundError when missing â€” it never returns
      * null (only get() does). Verify + treat not_found as false. */
     const { head, BlobNotFoundError } = await import("@vercel/blob");
     try {
@@ -100,7 +138,7 @@ class BlobStore implements RenderStore {
   }
 }
 
-/* ── Disk backend (dev only) ───────────────────────────────────── */
+/* â”€â”€ Disk backend (dev only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -141,14 +179,19 @@ function dirnameOf(file: string): string {
 const blobStore = new BlobStore();
 const diskStore = new DiskStore();
 
-/* Lazily resolved per call — see header note. */
+/* Lazily resolved per call â€” see header note. Method access returns a
+ * bound method of the backend chosen for THIS call. */
 export const renderStore: RenderStore = new Proxy({} as RenderStore, {
   get(_t, prop: keyof RenderStore) {
-    return blobConfigured() ? blobStore[prop] : diskStore[prop];
+    return async (...args: unknown[]) => {
+      const backend = (await shouldUseBlob()) ? blobStore : diskStore;
+      const method = backend[prop] as (...a: unknown[]) => unknown;
+      return method.apply(backend, args);
+    };
   },
 });
 
-/* Path scheme — everything lives under `renders/<jobId>/`:
+/* Path scheme â€” everything lives under `renders/<jobId>/`:
  *   spec.json       the full validated plan (resume + idempotency)
  *   chunk-N.mp4    verse-aligned encoded segments
  *   bg-input.mp4    uploaded background video (upload mode)
@@ -161,6 +204,7 @@ export const renderPaths = {
   final: (jobId: string) => `renders/${jobId}/final.mp4`,
 };
 
-export function isStoreConfigured(): boolean {
-  return blobConfigured();
+/* Awaitable for routes that need to know the backend (cron cleanup). */
+export async function isStoreConfigured(): Promise<boolean> {
+  return shouldUseBlob();
 }

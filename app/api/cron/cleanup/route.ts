@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!isStoreConfigured()) {
+  if (!(await isStoreConfigured())) {
     /* Disk backend (dev): nuke the whole dev scratch dir — it's ephemeral. */
     await renderStore.delete("renders/");
     return NextResponse.json({ ok: true, removed: -1 });
