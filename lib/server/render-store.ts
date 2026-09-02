@@ -186,12 +186,14 @@ export const renderStore: RenderStore = new Proxy({} as RenderStore, {
  *   spec.json       the full validated plan (resume + idempotency)
  *   chunk-N.mp4    verse-aligned encoded segments
  *   bg-input.mp4    uploaded background video (upload mode)
+ *   bg-relay-N.mp4 browser-relayed bg videos (Pexels datacenter-403 fallback)
  *   final.mp4      concatenated + faststarted output
  */
 export const renderPaths = {
   spec: (jobId: string) => `renders/${jobId}/spec.json`,
   chunk: (jobId: string, i: number) => `renders/${jobId}/chunk-${i}.mp4`,
   bgUpload: (jobId: string) => `renders/${jobId}/bg-input.mp4`,
+  bgRelay: (jobId: string, i: number) => `renders/${jobId}/bg-relay-${i}.mp4`,
   final: (jobId: string) => `renders/${jobId}/final.mp4`,
 };
 

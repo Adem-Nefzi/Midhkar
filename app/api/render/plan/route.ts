@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   }
 
   /* Dev fallback: multipart with an existing jobId stores the bg
-   * file for that job (client uploads go browser→Blob in prod).
+   * file(s) for that job (client uploads go browser→Blob in prod).
    * Prod (VERCEL env or NODE_ENV=production) must never accept it. */
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) {
@@ -62,14 +62,22 @@ export async function POST(request: Request) {
     if (!isDev) return bad("Not found", 404);
     const form = await request.formData();
     const jobId = String(form.get("jobId") ?? "");
+    const slot = String(form.get("slot") ?? "bg-input"); /* bg-input | bg-relay-N */
     const bg = form.get("bg");
-    if (!JOB_ID_RE.test(jobId) || !(bg instanceof File)) {
+    if (
+      !JOB_ID_RE.test(jobId) ||
+      !(bg instanceof File) ||
+      !/^(bg-input|bg-relay-\d+)$/.test(slot)
+    ) {
       return bad("Invalid upload");
     }
     if (bg.size > MAX_BG_BYTES) return bad("Background video too large (max 100MB)", 413);
     const specBytes = await renderStore.get(renderPaths.spec(jobId));
     if (!specBytes) return bad("Job not found", 404);
-    await renderStore.put(renderPaths.bgUpload(jobId), new Uint8Array(await bg.arrayBuffer()));
+    const dest = slot === "bg-input"
+      ? renderPaths.bgUpload(jobId)
+      : renderPaths.bgRelay(jobId, Number(slot.slice("bg-relay-".length)));
+    await renderStore.put(dest, new Uint8Array(await bg.arrayBuffer()));
     return NextResponse.json({ ok: true });
   }
 

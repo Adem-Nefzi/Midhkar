@@ -2,12 +2,17 @@
  * POST /api/render/chunk — renders ONE verse-aligned chunk of a plan
  * and stores it as chunk-N.mp4. Idempotent: an existing chunk returns
  * immediately, so client retries and refresh-resume are safe.
+ *
+ * Bg relay: when the server can't fetch bg videos (Pexels 403s the
+ * datacenter IP), this route returns 422 bg_unavailable. The client
+ * then uploads the videos browser→Blob as bg-relay-N and re-POSTs
+ * with bgRelayed:true — renderChunk then reads those bytes instead.
  */
 import { NextResponse } from "next/server";
 import { TokenBucketLimiter, getClientIp } from "@/lib/rate-limit";
 import { JOB_ID_RE, type RenderPlan } from "@/lib/render-plan";
 import { renderStore, renderPaths } from "@/lib/server/render-store";
-import { renderChunk } from "@/lib/server/render-chunk";
+import { renderChunk, BgUnavailableError } from "@/lib/server/render-chunk";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,10 +31,19 @@ export async function POST(request: Request) {
 
   let jobId = "";
   let chunkIndex = -1;
+  let bgRelayed = false;
+  let noBg = false;
   try {
-    const body = (await request.json()) as { jobId?: string; chunk?: number };
+    const body = (await request.json()) as {
+      jobId?: string;
+      chunk?: number;
+      bgRelayed?: boolean;
+      noBg?: boolean;
+    };
     jobId = String(body.jobId ?? "");
     chunkIndex = Number(body.chunk ?? -1);
+    bgRelayed = body.bgRelayed === true;
+    noBg = body.noBg === true;
   } catch {
     return bad("Invalid body");
   }
@@ -47,11 +61,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, cached: true });
   }
 
-  /* Upload-mode bg bytes come from the store; pexels mode uses URLs. */
-  let bgUpload: Uint8Array | null = null;
-  if (plan.spec.bg.mode === "upload") {
-    bgUpload = await renderStore.get(renderPaths.bgUpload(jobId));
-    if (!bgUpload) return bad("Background video missing", 410);
+  /* Bg bytes: relayed uploads first, else upload-mode's bg-input.mp4.
+   * noBg (client's relay failed): skip the CDN entirely — gradient. */
+  let bgUploads: Uint8Array[] = [];
+  if (bgRelayed) {
+    for (let i = 0; ; i++) {
+      const bytes = await renderStore.get(renderPaths.bgRelay(jobId, i));
+      if (!bytes) break;
+      bgUploads.push(bytes);
+    }
+    if (bgUploads.length === 0) return bad("Relayed backgrounds missing", 410);
+  } else if (!noBg && plan.spec.bg.mode === "upload") {
+    const bg = await renderStore.get(renderPaths.bgUpload(jobId));
+    if (!bg) return bad("Background video missing", 410);
+    bgUploads = [bg];
   }
 
   try {
@@ -62,9 +85,18 @@ export async function POST(request: Request) {
       plan.chunks.length,
       () => {},
       AbortSignal.timeout(280_000),
+      bgUploads,
+      noBg,
     );
     await renderStore.put(renderPaths.chunk(jobId, chunkIndex), new Uint8Array(buffer));
   } catch (err) {
+    if (err instanceof BgUnavailableError) {
+      /* Server can't reach the CDN — client relays the bytes. */
+      return NextResponse.json(
+        { error: "bg_unavailable", detail: err.message },
+        { status: 422 },
+      );
+    }
     /* Generic message — never leak ffmpeg stderr / stack to client. */
     console.error(`[render] chunk ${chunkIndex} of ${jobId} failed:`, err);
     return bad("Chunk render failed — please try again", 500);

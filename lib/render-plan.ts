@@ -38,10 +38,13 @@ export interface RenderPlan {
   createdAt: number;
 }
 
-/* Vercel Hobby: 300s max per function invocation. Budget ~55s of
- * output per chunk — the verified pipeline renders ≈60s of output in
- * ~120s at 1 vCPU, leaving headroom for audio download + bg decode. */
-const MAX_CHUNK_SEC = 55;
+/* Vercel Hobby: 300s max per function invocation. With real-bg
+ * compositing a chunk renders at ~7x realtime (measured in prod:
+ * 21s of output -> 143s), so MAX_CHUNK_SEC must keep worst-case
+ * render time well under the cap: 30s * 7x + audio/bg fetch ~ 240s.
+ * A 46s selection (full Fatihah) must therefore SPLIT into chunks —
+ * never raise this back to 55 without re-measuring. */
+const MAX_CHUNK_SEC = 30;
 export const MAX_TOTAL_SEC = 10 * 60;
 
 /** jobId charset + length — the single source of truth for validation. */

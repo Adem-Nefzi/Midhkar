@@ -40,7 +40,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       getSignedToken: async (pathname) => {
-        const m = pathname.match(/^renders\/([0-9a-z]{22,})\/bg-input\.[a-z0-9]+$/);
+        const m = pathname.match(
+          /^renders\/([0-9a-z]{22,})\/(bg-input|bg-relay-\d+)\.(mp4|webm|mov)$/,
+        );
         if (!m) throw new Error("Invalid upload path");
         /* Only sign for jobs whose plan already exists — blocks
            anonymous storage-fill via direct token requests. */

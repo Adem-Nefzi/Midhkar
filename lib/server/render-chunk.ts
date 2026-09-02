@@ -250,14 +250,13 @@ async function ffprobeBin(): Promise<string> {
 }
 
 /* Gradient fallback painted under the overlays whenever a bg frame is
- * missing/un-decodable and when there is no bg video at all â€” kept in
- * lockstep with the gradient the overlay-baking path uses, so a
- * dropped bg clip never flashes a different color. */
+ * missing/un-decodable and when there is no bg video at all — kept in
+ * lockstep with the gradient the overlay-baking path uses. Darkening
+ * is applied ONCE here (no separate bgOverlay pass when this runs). */
 function drawFallbackBg(
   ctx: CanvasRenderingContext2D,
   cw: number,
   ch: number,
-  s: VideoSettings,
 ): void {
   const g = ctx.createLinearGradient(0, 0, cw, ch);
   g.addColorStop(0, "#09090f");
@@ -272,11 +271,6 @@ function drawFallbackBg(
   glow.addColorStop(1, "transparent");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, cw, ch);
-  const overlay = Number(s?.bgOverlay);
-  if (Number.isFinite(overlay) && overlay > 0) {
-    ctx.fillStyle = `rgba(0,0,0,${Math.min(1, overlay / 100)})`;
-    ctx.fillRect(0, 0, cw, ch);
-  }
 }
 
 /* â”€â”€ Resolution / bitrate (mirror device-profile) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -355,6 +349,21 @@ function transitionFor(
 
 /* â”€â”€ The chunk render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
+/* ── Bg relay signal ────────────────────────────────────────────
+ * Thrown when bg videos were selected but every clip failed to
+ * extract (typically Pexels/Cloudflare 403ing the Vercel datacenter
+ * IP). The chunk route translates this to HTTP 422 bg_unavailable and
+ * the CLIENT re-uploads the videos browser→Blob (its IP is clean) and
+ * retries the chunk. */
+export class BgUnavailableError extends Error {
+  constructor(urlsAttempted: number) {
+    super(
+      `all ${urlsAttempted} background clips failed to fetch/decode server-side`,
+    );
+    this.name = "BgUnavailableError";
+  }
+}
+
 export async function renderChunk(
   spec: RenderPlanSpec,
   chunk: RenderChunk,
@@ -362,7 +371,8 @@ export async function renderChunk(
   chunkCount: number,
   onProgress: ProgressFn,
   signal: AbortSignal,
-  bgUpload?: Uint8Array | null,
+  bgUploads: Uint8Array[] = [],
+  noBg = false,
 ): Promise<Buffer> {
   ensureFonts();
   /* The wire settings ARE the app's VideoSettings â€” the vendor copy
@@ -450,23 +460,27 @@ export async function renderChunk(
    * Memory-bounded: JPEG-encoded frames only (decoded on demand in
    * the compositing loop, LRU-cached), hard cap on total stored
    * frames so a 2GB function never OOMs. A clip that fails to
-   * extract after one retry is DROPPED; if every clip fails, the
-   * overlays bake the gradient fallback (below) â€” never a black
-   * video. hasBgVideo is decided by ACTUAL extracted frames, not by
-   * URL count. */
-  onProgress("Preparing backgroundâ€¦", 30);
-  const bgSources: (string | Buffer)[] = bgUpload
-    ? [Buffer.from(bgUpload)]
-    : spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0
-      ? [...(spec.bg.urls ?? [])]
-      : [];
-  const BG_HARD_CAP = 900; /* 900 JPEGs @1080Ã—1920 â‰ˆ â‰¤540MB stored */
+   * extract after one retry is DROPPED. When the client has RELAYED
+   * the bg bytes (bg-relay-*) those buffers are the source of truth;
+   * if any clip still fails with relayed bytes it is a decode
+   * problem, not a fetch problem — no relay loop. If NO relayed bytes
+   * exist and EVERY URL clip fails (Pexels 403s datacenter IPs),
+   * throw BgUnavailableError so the client can relay and retry. */
+  onProgress("Preparing background…", 30);
+  const bgUrlSources: (string | Buffer)[] =
+    bgUploads.length > 0
+      ? bgUploads.map((u) => Buffer.from(u))
+      : !noBg && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0
+        ? [...(spec.bg.urls ?? [])]
+        : [];
+  const bgWasRelayed = bgUploads.length > 0;
+  const BG_HARD_CAP = 900; /* 900 JPEGs @1080×1920 ≈ ≤540MB stored */
   const bgFramesList: Buffer[][] = [];
-  if (bgSources.length > 0) {
+  if (bgUrlSources.length > 0) {
     const cap = spec.quality.isLowPower ? 1200 : 2400;
-    const budget = Math.min(cap * bgSources.length, totalFrames + 64, BG_HARD_CAP);
+    const budget = Math.min(cap * bgUrlSources.length, totalFrames + 64, BG_HARD_CAP);
     const durations2: number[] = [];
-    for (const u of bgSources) {
+    for (const u of bgUrlSources) {
       if (typeof u === "string") {
         try {
           durations2.push(await probeDuration(u));
@@ -474,7 +488,7 @@ export async function renderChunk(
           durations2.push(0);
         }
       } else {
-        durations2.push(0); /* uploaded bytes â€” even split */
+        durations2.push(0); /* uploaded bytes — even split */
       }
     }
     const known = durations2.filter((d) => d > 0);
@@ -484,18 +498,18 @@ export async function renderChunk(
       const sum = known.reduce((a, b) => a + b, 0);
       return Math.max(30, Math.min(cap, Math.round((budget * d) / sum)));
     });
-    for (let i = 0; i < bgSources.length; i++) {
+    for (let i = 0; i < bgUrlSources.length; i++) {
       if (signal.aborted) throw new Error("Aborted");
-      onProgress(`Decoding backgrounds ${i + 1}/${bgSources.length}â€¦`, 34);
+      onProgress(`Decoding backgrounds ${i + 1}/${bgUrlSources.length}…`, 34);
       let frames: Buffer[] | null = null;
       for (let attempt = 0; attempt < 2 && !frames; attempt++) {
         try {
-          frames = await extractBgFrames(bgSources[i], cw, ch, alloc[i]);
+          frames = await extractBgFrames(bgUrlSources[i], cw, ch, alloc[i]);
           if (frames.length === 0) frames = null; /* 0 frames = failure */
         } catch (err) {
           if (attempt === 1) {
             console.warn(
-              `[render] bg clip ${i} failed twice â€” dropping:`,
+              `[render] bg clip ${i} failed twice — dropping:`,
               err instanceof Error ? err.message : err,
             );
           }
@@ -504,8 +518,13 @@ export async function renderChunk(
       if (frames && frames.length > 0) bgFramesList.push(frames);
     }
     if (bgFramesList.length === 0) {
+      if (!bgWasRelayed && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0) {
+        /* Server can't reach the CDN (likely 403 on the datacenter IP)
+         * — tell the client to relay the bytes and retry. */
+        throw new BgUnavailableError(spec.bg.urls?.length ?? 0);
+      }
       console.warn(
-        `[render] all ${bgSources.length} bg clips failed â€” rendering gradient fallback`,
+        `[render] all ${bgUrlSources.length} bg clips failed — rendering gradient fallback`,
       );
     }
   }
@@ -617,6 +636,12 @@ export async function renderChunk(
   ];
 
   const proc = spawn(ffmpegBin(), args, { windowsHide: true });
+  /* Abort must kill the encode immediately — otherwise a wedged stdin
+   * write blocks until the function's hard timeout. */
+  const onAbort = () => {
+    try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
 
   const composite = createCanvas(cw, ch);
   const cctx = composite.getContext("2d");
@@ -725,14 +750,14 @@ export async function renderChunk(
             }
           }
         } else {
-          drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch, s);
+          drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch);
         }
         if (bgDarkenAlpha > 0) {
           cctx.fillStyle = `rgba(0,0,0,${bgDarkenAlpha})`;
           cctx.fillRect(0, 0, cw, ch);
         }
       } else {
-        drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch, s);
+        drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch);
       }
 
       const localEnd = seg.totalFrames - 1;

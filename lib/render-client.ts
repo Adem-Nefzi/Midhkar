@@ -138,21 +138,25 @@ export function cloudCanRender(spec: {
 }
 
 /**
- * Upload the background video for a job. Production: Vercel Blob
+ * Upload one bg video into a job slot. Production: Vercel Blob
  * client upload (browser → Blob direct, no 4.5MB function-body cap).
  * Dev (no Blob store): direct multipart POST — localhost has no
  * meaningful body limit.
+ * Slots: "bg-input" (upload mode) | "bg-relay-N" (datacenter-403 relay).
  */
 async function uploadBgFile(
   jobId: string,
   file: File,
   onLog: (msg: string, pct: number) => void,
   signal: AbortSignal,
+  slot: "bg-input" | `bg-relay-${number}` = "bg-input",
 ): Promise<void> {
-  onLog("Uploading background video…", 3);
+  const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".") + 1) : "mp4";
+  const pathname = `renders/${jobId}/${slot}.${ext}`;
+  onLog(slot === "bg-input" ? "Uploading background video…" : `Relaying background ${slot}…`, 3);
   try {
     const { uploadPresigned } = await import("@vercel/blob/client");
-    await uploadPresigned(`renders/${jobId}/bg-input.mp4`, file, {
+    await uploadPresigned(pathname, file, {
       access: "private",
       handleUploadUrl: `${API}/upload-token`,
       multipart: true,
@@ -163,6 +167,7 @@ async function uploadBgFile(
     if (signal.aborted) throw err;
     const form = new FormData();
     form.append("jobId", jobId);
+    form.append("slot", slot);
     form.append("bg", file);
     const res = await fetch(`${API}/plan`, {
       method: "POST",
@@ -174,6 +179,39 @@ async function uploadBgFile(
       throw new Error(body.error || "Background upload failed");
     }
   }
+}
+
+/**
+ * Relay the bg playlist browser→Blob: fetch each selected URL with
+ * the CLIENT's IP (not blocked by the CDN), then upload as
+ * bg-relay-N so the chunk route reads them instead of the URLs.
+ * Returns false when any fetch fails (caller falls back gracefully).
+ */
+async function relayBgPlaylist(
+  jobId: string,
+  urls: string[],
+  onLog: (msg: string, pct: number) => void,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const files: File[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    if (signal.aborted) return false;
+    onLog(`Fetching background ${i + 1}/${urls.length}…`, 5);
+    try {
+      const res = await fetch(urls[i], { signal });
+      if (!res.ok) return false;
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength < 1024) return false;
+      files.push(new File([buf], `bg-relay-${i}.mp4`, { type: "video/mp4" }));
+    } catch {
+      return false;
+    }
+  }
+  for (let i = 0; i < files.length; i++) {
+    if (signal.aborted) return false;
+    await uploadBgFile(jobId, files[i], onLog, signal, `bg-relay-${i}` as `bg-relay-${number}`);
+  }
+  return true;
 }
 
 /**
@@ -253,18 +291,56 @@ export async function renderVideoCloud(
 
     /* 2. Chunks (sequential; idempotent per chunk) */
     const chunkSpan = 90 / job.chunks; // 5% → 95%
+    let bgRelayed = false; /* loop-guard: relay at most once per job */
     for (let i = 0; i < job.chunks; i++) {
       if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
       onLog(
         `Rendering part ${i + 1}/${job.chunks} on the server…`,
         Math.round(5 + i * chunkSpan),
       );
-      await postJson<{ ok: boolean }>(
-        "/chunk",
-        { jobId: job.jobId, chunk: i },
-        CHUNK_TIMEOUT_MS,
-        ctrl.signal,
-      );
+      let res = await fetch(`${API}/chunk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed }),
+        signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
+      });
+
+      /* 422 bg_unavailable: the Vercel datacenter IP is blocked by the
+       * bg CDN (Pexels/Cloudflare 403). The BROWSER can fetch it fine
+       * — relay the bytes and retry this chunk once. */
+      if (res.status === 422 && !bgRelayed && spec.bg.urls?.length) {
+        bgRelayed = true;
+        onLog("Server can't reach the background library — relaying from your browser…", 5);
+        const ok = await relayBgPlaylist(
+          job.jobId,
+          spec.bg.urls.slice(0, 6),
+          onLog,
+          ctrl.signal,
+        );
+        if (!ok) {
+          onLog("Background relay failed — rendering with gradient background…", 5);
+          /* Explicit noBg: skip the CDN entirely (gradient fallback
+           * server-side) — no second BgUnavailableError loop. */
+          res = await fetch(`${API}/chunk`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: job.jobId, chunk: i, noBg: true }),
+            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
+          });
+        } else {
+          res = await fetch(`${API}/chunk`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed: true }),
+            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
+          });
+        }
+      }
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error || `Chunk render failed (${res.status})`);
+      }
     }
 
     /* 3. Finalize (lossless concat + faststart) */

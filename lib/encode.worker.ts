@@ -222,7 +222,28 @@ function allocateBgBudget(
    hardware-accelerated, no seeking.
 ══════════════════════════════════════════════════════════════ */
 
-const FALLBACK_BG_COLOR = "#0b0b0f";
+/* Gradient fallback for decode-failed bgs — matches the server
+ * renderer's drawFallbackBg so local and cloud outputs look the same
+ * instead of a flat near-black frame. */
+function paintFallbackBgGradient(
+  ctx: OffscreenCanvasRenderingContext2D,
+  cw: number,
+  ch: number,
+): void {
+  const g = ctx.createLinearGradient(0, 0, cw, ch);
+  g.addColorStop(0, "#09090f");
+  g.addColorStop(0.5, "#120d03");
+  g.addColorStop(1, "#09090f");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cw, ch);
+  const glow = ctx.createRadialGradient(
+    cw / 2, ch / 2, 0, cw / 2, ch / 2, Math.max(cw, ch) * 0.55,
+  );
+  glow.addColorStop(0, "rgba(212,175,55,0.07)");
+  glow.addColorStop(1, "transparent");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, cw, ch);
+}
 
 async function decodeBackgroundFrames(
   bytes: ArrayBuffer,
@@ -579,8 +600,7 @@ async function runEncode(payload: StartPayload) {
           ctx.globalAlpha = 1;
         }
       } else if (bgDecodeFailed) {
-        ctx.fillStyle = FALLBACK_BG_COLOR;
-        ctx.fillRect(0, 0, cw, ch);
+        paintFallbackBgGradient(ctx, cw, ch);
       }
       // Darkness overlay over the video bg (static-color bgs bake this
       // into their overlay bitmaps on the main thread instead).
