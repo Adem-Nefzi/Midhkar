@@ -383,7 +383,7 @@ export function StepSettings({
         className={`grid gap-6 transition-all duration-300 lg:grid-cols-3 ${!platformChosen ? "pointer-events-none select-none opacity-40" : ""}`}
       >
         {/* ── Col 1: Reciter ────────────────────────────────── */}
-        <div className="panel space-y-4 p-5">
+        <div className="panel space-y-4 p-5" data-tour="reciter-panel">
           <SectionHead
             icon={<MicIcon className="h-4 w-4 text-gold/60" />}
             step={2}
@@ -492,7 +492,7 @@ export function StepSettings({
         </div>
 
         {/* ── Col 2 & 3: Tabbed customisation panel ─────────── */}
-        <div className="panel space-y-4 p-5 lg:col-span-2">
+        <div className="panel space-y-4 p-5 lg:col-span-2" data-tour="customise-panel">
           <div className="flex items-center justify-between">
             <SectionHead
               icon={<PaletteIcon className="h-4 w-4 text-gold/60" />}

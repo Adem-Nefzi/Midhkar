@@ -191,7 +191,7 @@ export function StepSurah({
 
       {/* ── Popular rail ───────────────────────────────────────── */}
       {!query && filter === "all" && popular.length > 0 && (
-        <div className="mx-auto mb-8 max-w-5xl">
+        <div className="mx-auto mb-8 max-w-5xl" data-tour="surah-popular">
           <p className="mb-3 text-center text-[13px] font-medium uppercase tracking-[0.25em] text-gold/60">
             {L({ en: "Often recited", fr: "Souvent récitées", ar: "كثيرا ما تُتلى" })}
           </p>
@@ -249,6 +249,7 @@ export function StepSurah({
       </div>
 
       {/* ── The illuminated index ──────────────────────────────── */}
+      <div data-tour="surah-index">
       {loading ? (
         <div className="mx-auto grid max-w-5xl gap-2 sm:gap-3 lg:grid-cols-2">
           {Array.from({ length: 10 }).map((_, i) => (
@@ -353,6 +354,7 @@ export function StepSurah({
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

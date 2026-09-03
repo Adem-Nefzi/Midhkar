@@ -204,7 +204,7 @@ export function StepVerses({
       </div>
 
       {selected.size > 0 && (
-        <div className="mb-5 animate-step-in text-center">
+        <div className="mb-5 animate-step-in text-center" data-tour="verses-chip">
           <span className="inline-flex flex-wrap items-center justify-center gap-2.5 rounded-full border border-gold/30 bg-gold/[0.07] px-5 py-2 text-sm text-gold lit-soft">
             <Bloom className="h-3.5 w-3.5" petals={6} />
             <span className="font-medium">{selected.size}</span>
@@ -252,7 +252,7 @@ export function StepVerses({
         />
       </div>
 
-      <div className="panel overflow-hidden">
+      <div className="panel overflow-hidden" data-tour="verses-list">
         {loading ? (
           <div className="custom-scrollbar max-h-[520px] overflow-y-auto">
             {Array.from({ length: 6 }).map((_, i) => (

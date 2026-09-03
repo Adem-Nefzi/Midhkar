@@ -285,6 +285,7 @@ export function StepGenerate({
       </div>
 
       <div className="flex flex-col items-start justify-center gap-8 lg:flex-row">
+        <div data-tour="generate-preview">
         <LivePreview
           surah={surah}
           ayahs={ayahs}
@@ -296,9 +297,10 @@ export function StepGenerate({
           locale={locale}
           className="shrink-0"
         />
+        </div>
 
         <div className="min-w-0 flex-1 space-y-4">
-          <div className="panel p-5">
+          <div className="panel p-5" data-tour="generate-summary">
             <h3 className="mb-4 text-[13px] font-medium uppercase tracking-wider text-gold/70">
               {ar ? "ملخص" : "Summary"}
             </h3>

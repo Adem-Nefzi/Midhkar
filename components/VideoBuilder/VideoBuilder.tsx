@@ -933,7 +933,7 @@ export function VideoBuilder() {
                 exit={{ opacity: 0, x: 48 }}
                 transition={{ duration: 0.5, ease: EASE_OUT }}
               >
-                <div className="sticky top-8">
+                <div className="sticky top-8" data-tour="side-preview">
                   <LivePreview
                     surah={selectedSurah}
                     ayahs={selectedAyahsData}
