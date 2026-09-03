@@ -531,7 +531,13 @@ export function VideoBuilder() {
           : settings.videoUrl
             ? [settings.videoUrl]
             : [];
-        if (urls.length) bg.urls = urls;
+        /* BOTH fields — mode stays "none" + urls set means the server
+           renders the gradient fallback while believing a bg was
+           requested. This exact mismatch shipped the black-bg bug. */
+        if (urls.length) {
+          bg.mode = "pexels";
+          bg.urls = urls;
+        }
       }
 
       const spec = {

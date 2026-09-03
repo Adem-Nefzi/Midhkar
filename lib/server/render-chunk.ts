@@ -1,6 +1,6 @@
 ﻿/**
  * render-chunk.ts â€” encodes ONE verse-aligned chunk of a render plan
- * to an H.264/AAC MP4, port of the verified render-service pipeline
+ * to an H.264/AAC MP4 (the old render-service/ Docker port was deleted)
  * (cumulative segments, alpha-sum-1 crossfades, bg seams, bitrate
  * ladder, x264 memory-diet profile). Identical encode parameters on
  * every chunk â†’ the MP4s concat losslessly.
@@ -30,7 +30,7 @@ const AUDIO_BITRATE = 128_000;
 
 type ProgressFn = (msg: string, pct: number) => void;
 
-/* â”€â”€ Audio (mirrors render-service/src/render.ts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Audio fetch + decode to mono 48kHz PCM */
 
 function audioUrlCandidates(
   reciter: RenderPlanSpec["reciter"],
@@ -38,7 +38,10 @@ function audioUrlCandidates(
   ayah: number,
 ): string[] {
   const urls: string[] = [];
-  if (reciter.primary !== false) {
+  /* STRICT === true — mirrors lib/quran.ts getAudioUrlCandidates: an
+   * omitted/undefined primary means the-quran-project folder is dead,
+   * go straight to everyayah. `!== false` used to 404 first. */
+  if (reciter.primary === true) {
     urls.push(
       `https://the-quran-project.github.io/Quran-Audio/Data/${reciter.quranApiNo}/${surah}_${ayah}.mp3`,
     );
@@ -296,7 +299,7 @@ function videoBitrate(cw: number, ch: number, isLowPower: boolean) {
   return Math.round(bitrate * (isLowPower ? 0.7 : 1.0));
 }
 
-/* â”€â”€ Segments / transitions (verbatim from render-service) â”€â”€â”€â”€â”€â”€ */
+/* Segments / transitions (cumulative-time allocation - drift-free) */
 
 interface Segment {
   totalFrames: number;

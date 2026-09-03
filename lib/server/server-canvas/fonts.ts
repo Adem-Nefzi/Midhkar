@@ -1,8 +1,8 @@
-/**
- * fonts.ts — registers the bundled TTFs with @napi-rs/canvas's
+﻿/**
+ * fonts.ts â€” registers the bundled TTFs with @napi-rs/canvas's
  * GlobalFontManager under the exact family names the app's settings
  * use, so vendored canva-utils measures/draws with identical font
- * binaries as the client. Port of render-service/src/canvas/fonts.ts.
+ * binaries as the client.
  *
  * Path resolution must NOT rely on import.meta.url: inside the
  * serverless webpack bundle it resolves to the BUILD-time path
@@ -25,7 +25,7 @@ function candidateFontDirs(): string[] {
     const here = dirname(fileURLToPath(import.meta.url));
     dirs.push(join(here, "fonts"));
   } catch {
-    /* webpack transform — ignore */
+    /* webpack transform â€” ignore */
   }
   return dirs;
 }
@@ -59,7 +59,7 @@ export function ensureFonts(): void {
   if (registered) return;
   if (!FONTS_DIR) {
     throw new Error(
-      "Font binaries not found — expected lib/server/server-canvas/fonts in the bundle",
+      "Font binaries not found â€” expected lib/server/server-canvas/fonts in the bundle",
     );
   }
   for (const spec of SPECS) {

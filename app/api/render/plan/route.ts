@@ -110,6 +110,16 @@ export async function POST(request: Request) {
   ) {
     return bad("Invalid reciter");
   }
+  /* Bg intent is derived from PRESENCE OF URLS, not the mode literal —
+   * a client that sends {mode:"none", urls:[…]} means "play these"
+   * (that exact mismatch shipped the black-bg bug). Normalize BEFORE
+   * validation so the URL checks always run for real playlists. */
+  if ((spec.bg?.urls?.length ?? 0) > 0) {
+    if (spec.bg.mode !== "upload") spec.bg.mode = "pexels";
+  } else if (spec.bg.mode === "pexels") {
+    /* pexels mode with zero urls = nothing selected = no bg */
+    spec.bg.mode = "none";
+  }
   if (spec.bg.mode === "pexels") {
     const urls = spec.bg.urls ?? [];
     if (urls.length > MAX_BG_URLS) return bad("Too many background videos");

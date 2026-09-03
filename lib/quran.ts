@@ -324,7 +324,11 @@ export function getAudioUrlCandidates(
   const entry = QURAN_FOUNDATION_RECITERS[reciterNo];
   if (!entry) return [];
   const urls: string[] = [];
-  if (entry.primary !== false) {
+  /* STRICT === true: `primary` is only set for reciters with a live
+   * the-quran-project folder (ids 1-5, probed 2026-08). An omitted
+   * primary used to pass `!== false` and every playback tried the
+   * dead CDN first — 14 console 404s per page. */
+  if (entry.primary === true) {
     urls.push(getQuranApiAudioUrl(reciterNo, surah, ayah));
   }
   const ev = getEveryayahAudioUrl(reciterNo, surah, ayah);
