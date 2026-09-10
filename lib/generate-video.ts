@@ -26,6 +26,8 @@ import {
   isWebCodecsSupported,
 } from "./webcodecs-muxer";
 
+import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
+
 import {
   getAudioUrlCandidates,
 } from "@/lib/quran";
@@ -546,6 +548,7 @@ export async function generateVideo(params: {
             : silenceSamples(FALLBACK_DUR);
         }
 
+        applyAyahDeclick(samples);
         const durSec = samples.length / SAMPLE_RATE;
         log(
           `Audio ${ayah.numberInSurah} (${i + 1}/${ayahs.length})`,
@@ -582,6 +585,7 @@ export async function generateVideo(params: {
         offset += Math.round(p.trailSec * SAMPLE_RATE);
       }
     }
+    applyBookendFades(fullTrack);
 
     /* ── 3. Wait for background bytes (already downloading since
        step 1a — usually already resolved). ─────────────────────── */

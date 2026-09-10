@@ -19,6 +19,7 @@ import {
 } from "./server-canvas/canva-utils";
 import type { RenderPlanSpec, RenderChunk } from "@/lib/render-plan";
 import type { VideoSettings } from "./server-canvas/types-settings";
+import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
 
 const RENDER_FPS = 30;
 const TRANSITION_WINDOW_FRAMES = 8;
@@ -26,7 +27,7 @@ const BOOKEND_FADE_FRAMES = 6;
 const SEAM_FRAMES = 10;
 const FALLBACK_DUR = 6;
 const SAMPLE_RATE = 48000;
-const AUDIO_BITRATE = 128_000;
+const AUDIO_BITRATE = 160_000;
 
 type ProgressFn = (msg: string, pct: number) => void;
 
@@ -427,18 +428,19 @@ export async function renderChunk(
         `[render] audio fetch failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence`,
       );
     }
-    let samples: Float32Array;
+let samples: Float32Array;
     try {
       samples = raw
         ? await decodeAudioPcm(raw)
         : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
     } catch (err) {
       console.warn(
-        `[render] audio decode failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence:`,
+        `[render] audio decode failed for ${spec.surah.number}:${ayahs[i].numberInSurah} — using ${FALLBACK_DUR}s silence:`,
         err instanceof Error ? err.message : err,
       );
       samples = new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
     }
+    applyAyahDeclick(samples);
     buffers.push(samples);
     durations.push({ totalSec: samples.length / SAMPLE_RATE, trailSec: verseSpacing });
     onProgress(
@@ -455,6 +457,9 @@ export async function renderChunk(
     track.set(buffers[i], offset);
     offset += buffers[i].length + Math.round(durations[i].trailSec * SAMPLE_RATE);
   }
+
+  /* Apply bookend fades to the full audio track (match video bookend fades) */
+  applyBookendFades(track);
 
   /* 2. Segments */
   const { segments, totalFrames } = buildSegments(durations, RENDER_FPS);
@@ -596,7 +601,7 @@ export async function renderChunk(
 
   /* 5. Composite + encode via FFmpeg pipe */
   onProgress("Encoding chunkâ€¦", 48);
-  const x264Level = cw * ch >= 2073600 ? "4.0" : cw * ch >= 1166400 ? "3.2" : "3.1";
+  const x264Level = cw * ch >= 2073600 ? "4.2" : cw * ch >= 1166400 ? "4.0" : cw * ch >= 921600 ? "3.2" : "3.1";
   const outPath = join(
     tmpdir(),
     `midhkar-chunk-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
@@ -609,6 +614,10 @@ export async function renderChunk(
     await writeFile(audioPath, f32);
   }
 
+  /* H.264 encode: capped-CRF for best quality within the bitrate cap,
+   * ref=2 + lookahead=12 for quality, bframes=0 for speed/stability.
+   * Level 4.2 for 1080×1920@60 (level 4.0 only supports 30fps at that res). */
+  const x264Params = `ref=2:rc-lookahead=12:bframes=0:threads=2`;
   const args = [
     "-y",
     "-f", "rawvideo",
@@ -622,10 +631,10 @@ export async function renderChunk(
     "-i", audioPath,
     "-c:v", "libx264",
     "-threads", "2",
-    "-x264-params", "ref=1:rc-lookahead=8:bframes=0:threads=2",
+    "-x264-params", x264Params,
     "-profile:v", "high",
     "-level", x264Level,
-    "-b:v", String(bitrate),
+    "-crf", "20",
     "-maxrate", String(Math.round(bitrate * 1.45)),
     "-bufsize", String(bitrate * 2),
     "-g", String(2 * outputFps),

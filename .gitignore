@@ -14,7 +14,8 @@ node_modules
 .playwright-cli
 skills-lock.json
 /*.png
-render-service/node_modules
-render-service/test/out
-render-service/test-out-audio.f32
+/*-tmp.mjs
+/*-tmp*.js
 .env*
+.blobcheck
+.env.blobcheck
