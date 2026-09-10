@@ -3,7 +3,7 @@
 import { useI18n } from "@/lib/i18n";
 import { m } from "motion/react";
 import { EASE_OUT } from "@/components/MotionProvider";
-import { usePointerVars } from "@/components/Reveal";
+import { usePointerVars } from "@/components/use-pointer-vars";
 import { MicIcon, VideoCameraIcon } from "@/components/VideoBuilder/icons";
 import { Bloom, GardenMark } from "@/components/Ornament/ornaments";
 import { CalligraphyWatermark, ThreadDivider, Parallax } from "@/components/Home/atmosphere";
