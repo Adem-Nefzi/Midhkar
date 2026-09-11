@@ -402,11 +402,15 @@ export async function renderChunk(
     fontFamily:
       typeof rawS.fontFamily === "string" && rawS.fontFamily
         ? rawS.fontFamily
-        : "'Amiri', serif",
+        : "Amiri, serif",
     translationFontFamily:
       typeof rawS.translationFontFamily === "string" && rawS.translationFontFamily
         ? rawS.translationFontFamily
-        : "'Inter', sans-serif",
+        : "Inter, sans-serif",
+    transitionStyle:
+      typeof rawS.transitionStyle === "string" && rawS.transitionStyle
+        ? rawS.transitionStyle
+        : "none",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;

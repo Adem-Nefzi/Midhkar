@@ -110,28 +110,28 @@ export const DEFAULT_SETTINGS: VideoSettings = {
 /* ── Arabic fonts ────────────────────────────────────────────── */
 
 export const ARABIC_FONTS = [
-  { id: "amiri",         name: "Amiri",           nameAr: "أميري",         family: "'Amiri', serif" },
-  { id: "scheherazade",  name: "Scheherazade",     nameAr: "شهرزاد",        family: "'Scheherazade New', serif" },
-  { id: "noto-naskh",   name: "Noto Naskh",       nameAr: "نوتو نسخ",      family: "'Noto Naskh Arabic', serif" },
-  { id: "noto-kufi",    name: "Noto Kufi",        nameAr: "نوتو كوفي",     family: "'Noto Kufi Arabic', sans-serif" },
-  { id: "cairo",        name: "Cairo",            nameAr: "القاهرة",       family: "'Cairo', sans-serif" },
-  { id: "tajawal",      name: "Tajawal",          nameAr: "تجوال",         family: "'Tajawal', sans-serif" },
-  { id: "lateef",       name: "Lateef",           nameAr: "لطيف",          family: "'Lateef', serif" },
-  { id: "reem-kufi",    name: "Reem Kufi",        nameAr: "ريم كوفي",      family: "'Reem Kufi', sans-serif" },
+  { id: "amiri",         name: "Amiri",           nameAr: "أميري",         family: "Amiri, serif" },
+  { id: "scheherazade",  name: "Scheherazade",     nameAr: "شهرزاد",        family: "Scheherazade New, serif" },
+  { id: "noto-naskh",   name: "Noto Naskh",       nameAr: "نوتو نسخ",      family: "Noto Naskh Arabic, serif" },
+  { id: "noto-kufi",    name: "Noto Kufi",        nameAr: "نوتو كوفي",     family: "Noto Kufi Arabic, sans-serif" },
+  { id: "cairo",        name: "Cairo",            nameAr: "القاهرة",       family: "Cairo, sans-serif" },
+  { id: "tajawal",      name: "Tajawal",          nameAr: "تجوال",         family: "Tajawal, sans-serif" },
+  { id: "lateef",       name: "Lateef",           nameAr: "لطيف",          family: "Lateef, serif" },
+  { id: "reem-kufi",    name: "Reem Kufi",        nameAr: "ريم كوفي",      family: "Reem Kufi, sans-serif" },
 ] as const;
 
 /* ── Translation / Latin fonts ───────────────────────────────── */
 
 export const LATIN_FONTS = [
-  { id: "inter",        name: "Inter",            family: "'Inter', sans-serif" },
-  { id: "poppins",      name: "Poppins",          family: "'Poppins', sans-serif" },
-  { id: "jetbrains",    name: "JetBrains Mono",   family: "'JetBrains Mono', monospace" },
-  { id: "georgia",      name: "Georgia",          family: "'Georgia', 'Times New Roman', serif" },
-  { id: "lato",         name: "Lato",             family: "'Lato', sans-serif" },
-  { id: "playfair",     name: "Playfair Display", family: "'Playfair Display', serif" },
-  { id: "merriweather", name: "Merriweather",     family: "'Merriweather', serif" },
-  { id: "nunito",       name: "Nunito",           family: "'Nunito', sans-serif" },
-  { id: "amiri-latin",  name: "Amiri",            family: "'Amiri', serif" },
+  { id: "inter",        name: "Inter",            family: "Inter, sans-serif" },
+  { id: "poppins",      name: "Poppins",          family: "Poppins, sans-serif" },
+  { id: "jetbrains",    name: "JetBrains Mono",   family: "JetBrains Mono, monospace" },
+  { id: "georgia",      name: "Georgia",          family: "Georgia, 'Times New Roman', serif" },
+  { id: "lato",         name: "Lato",             family: "Lato, sans-serif" },
+  { id: "playfair",     name: "Playfair Display", family: "Playfair Display, serif" },
+  { id: "merriweather", name: "Merriweather",     family: "Merriweather, serif" },
+  { id: "nunito",       name: "Nunito",           family: "Nunito, sans-serif" },
+  { id: "amiri-latin",  name: "Amiri",            family: "Amiri, serif" },
 ] as const;
 
 /* ── Platform definitions (canonical source of truth) ───────── */
