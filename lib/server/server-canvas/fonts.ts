@@ -15,6 +15,7 @@ import { GlobalFonts } from "@napi-rs/canvas";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SERVER_WEIGHTS, ALL_CANVAS_FAMILIES, getServerWeights } from "@/lib/font-spec";
 
 function candidateFontDirs(): string[] {
   const dirs: string[] = [];
@@ -44,15 +45,6 @@ function resolveFontDir(): string | null {
 
 export const FONTS_DIR: string | null = resolveFontDir();
 
-type FontSpec = { file: string; family: string };
-
-const SPECS: FontSpec[] = [
-  { file: "amiri.ttf", family: "Amiri" },
-  { file: "amiri-bold.ttf", family: "Amiri Bold" },
-  { file: "scholarazade.ttf", family: "Scheherazade New" },
-  { file: "naskh-var.ttf", family: "Noto Naskh Arabic" },
-];
-
 let registered = false;
 
 export function ensureFonts(): void {
@@ -62,13 +54,32 @@ export function ensureFonts(): void {
       "Font binaries not found â€” expected lib/server/server-canvas/fonts in the bundle",
     );
   }
-  for (const spec of SPECS) {
-    const data = readFileSync(join(FONTS_DIR, spec.file));
-    GlobalFonts.register(data, spec.family);
+  /* Register all families with all their required weights */
+  for (const family of ALL_CANVAS_FAMILIES) {
+    const weights = getServerWeights(family);
+    for (const weight of weights) {
+      const fileName = weight === "400" 
+        ? `${family.toLowerCase().replace(/\s+/g, "-")}.ttf`
+        : `${family.toLowerCase().replace(/\s+/g, "-")}-${weight}.ttf`;
+      try {
+        const data = readFileSync(join(FONTS_DIR, fileName));
+        GlobalFonts.register(data, family);
+      } catch {
+        /* font file may not exist for every weight â€” try common naming */
+        try {
+          const altName = family.toLowerCase().replace(/\s+/g, "-");
+          const altFile = weight === "400" 
+            ? `${altName}.ttf` 
+            : `${altName}-${weight}.ttf`;
+          const data = readFileSync(join(FONTS_DIR, altFile));
+          GlobalFonts.register(data, family);
+        } catch {
+          console.warn(`[fonts] Could not load ${family} ${weight}`);
+        }
+      }
+    }
   }
-  // Register the bold face under the primary family too, so ctx.font
-  // strings like "bold 26px Amiri" resolve to the real 700 face
-  // instead of canvas-synthesized faux-bold.
+  /* Also register Amiri Bold under "Amiri" for bold fallback */
   try {
     const bold = readFileSync(join(FONTS_DIR, "amiri-bold.ttf"));
     GlobalFonts.register(bold, "Amiri");

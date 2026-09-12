@@ -4,14 +4,14 @@
  * to ensure identical, click-free ayah-to-ayah transitions.
  */
 
-const SAMPLE_RATE = 48000;
+export const SAMPLE_RATE = 48000;
 
 /**
  * Raised-cosine (Hann) window for smooth, click-free fades.
  * length: number of samples
  * type: "in" for fade-in, "out" for fade-out
  */
-function raisedCosineFade(length: number, type: "in" | "out"): Float32Array {
+export function raisedCosineFade(length: number, type: "in" | "out"): Float32Array {
   const win = new Float32Array(length);
   for (let i = 0; i < length; i++) {
     // raised cosine: 0.5 * (1 - cos(pi * i / (len-1))) for fade-in

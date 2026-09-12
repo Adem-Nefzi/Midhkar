@@ -19,7 +19,7 @@ import {
 } from "./server-canvas/canva-utils";
 import type { RenderPlanSpec, RenderChunk } from "@/lib/render-plan";
 import type { VideoSettings } from "./server-canvas/types-settings";
-import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
+import { applyAyahDeclick, applyBookendFades, raisedCosineFade } from "@/lib/audio-fades";
 
 const RENDER_FPS = 30;
 const TRANSITION_WINDOW_FRAMES = 8;
@@ -402,15 +402,11 @@ export async function renderChunk(
     fontFamily:
       typeof rawS.fontFamily === "string" && rawS.fontFamily
         ? rawS.fontFamily
-        : "Amiri, serif",
+        : "'Amiri', serif",
     translationFontFamily:
       typeof rawS.translationFontFamily === "string" && rawS.translationFontFamily
         ? rawS.translationFontFamily
-        : "Inter, sans-serif",
-    transitionStyle:
-      typeof rawS.transitionStyle === "string" && rawS.transitionStyle
-        ? rawS.transitionStyle
-        : "none",
+        : "'Inter', sans-serif",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;
@@ -453,13 +449,50 @@ let samples: Float32Array;
     );
   }
 
+  const CROSSFADE_SAMPLES = Math.round(0.080 * SAMPLE_RATE); // 20ms crossfade
+  const CROSSFADE_IN = raisedCosineFade(CROSSFADE_SAMPLES, "in");
+  const CROSSFADE_OUT = raisedCosineFade(CROSSFADE_SAMPLES, "out");
+
   const totalDurSec = durations.reduce((a, d) => a + d.totalSec + d.trailSec, 0);
   const totalSamples = Math.round(totalDurSec * SAMPLE_RATE);
   const track = new Float32Array(totalSamples);
   let offset = 0;
+
   for (let i = 0; i < buffers.length; i++) {
-    track.set(buffers[i], offset);
-    offset += buffers[i].length + Math.round(durations[i].trailSec * SAMPLE_RATE);
+    const src = buffers[i];
+    const srcLen = src.length;
+    const isFirst = i === 0;
+    const isLast = i === buffers.length - 1;
+
+    const crossfadeLen = isFirst ? 0 : CROSSFADE_SAMPLES;
+    const crossfadeIn = !isFirst ? CROSSFADE_IN : null;
+    const crossfadeOutLen = i < buffers.length - 1 ? CROSSFADE_SAMPLES : 0;
+
+    // Apply crossfade-in at start (except first)
+    if (!isFirst) {
+      const fadeLen = Math.min(CROSSFADE_SAMPLES, srcLen);
+      for (let k = 0; k < crossfadeLen; k++) {
+        track[offset + k] *= CROSSFADE_IN[k];
+      }
+    }
+
+    // Write main body (excluding crossfade-out portion)
+    const writeLen = srcLen - (isLast ? 0 : CROSSFADE_SAMPLES);
+    track.set(src.subarray(0, writeLen), offset);
+    offset += writeLen;
+
+    // Apply crossfade-out at end (except last)
+    if (!isLast) {
+      const fadeOutStart = srcLen - CROSSFADE_SAMPLES;
+      for (let k = 0; k < CROSSFADE_SAMPLES; k++) {
+        if (fadeOutStart + k < srcLen) {
+          track[offset + k] *= CROSSFADE_OUT[k];
+        }
+      }
+      offset += crossfadeLen;
+    }
+
+    offset += srcLen + Math.round(durations[i].trailSec * SAMPLE_RATE);
   }
 
   /* Apply bookend fades to the full audio track (match video bookend fades) */

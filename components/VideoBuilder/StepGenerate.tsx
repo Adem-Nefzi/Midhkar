@@ -397,11 +397,11 @@ export function StepGenerate({
                 </button>
               </div>
             </div>
-<p>
-                {ar
-                  ? "تشفير بالجهاز — H.264/AAC عبر WebCodecs، لا حاجة لتحميل إضافي."
-                  : "On-device encoding — H.264/AAC via WebCodecs, no extra downloads."}
-              </p>
+            <p>
+              {ar
+                ? "يستخدم WebCodecs API — تشفير بالمعالج الرسومي، بدون تحميل إضافي."
+                : "Native WebCodecs API — GPU-accelerated H.264, no extra downloads."}
+            </p>
             {webCodecsSupported === false && (
               <p className="mt-1 text-red-400/90">
                 {ar
