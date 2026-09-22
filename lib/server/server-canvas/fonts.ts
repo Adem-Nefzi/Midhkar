@@ -1,8 +1,19 @@
 ﻿/**
- * fonts.ts â€” registers the bundled TTFs with @napi-rs/canvas's
+ * fonts.ts — registers the bundled TTFs with @napi-rs/canvas's
  * GlobalFontManager under the exact family names the app's settings
  * use, so vendored canva-utils measures/draws with identical font
- * binaries as the client.
+ * binaries as the client. Every family offered by ARABIC_FONTS /
+ * LATIN_FONTS in lib/types.ts is covered — a missing family falls
+ * back to sans-serif on the lambda while the browser preview shows
+ * the real font (the "wrong font in download" bug).
+ *
+ * Weights registered = weights the canvas actually draws with:
+ *   - Arabic ayah text: unprefixed (400)
+ *   - Translation: 600 (Lato/Merriweather have no 600 — the nearest
+ *     faces are bundled so skia matches CSS font-matching rules)
+ *   - Verse badge: bold (700) Noto Naskh Arabic
+ *   - Georgia is proprietary: Gelasio (metric-compatible, OFL) is
+ *     registered under the family name "Georgia".
  *
  * Path resolution must NOT rely on import.meta.url: inside the
  * serverless webpack bundle it resolves to the BUILD-time path
@@ -15,7 +26,6 @@ import { GlobalFonts } from "@napi-rs/canvas";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SERVER_WEIGHTS, ALL_CANVAS_FAMILIES, getServerWeights } from "@/lib/font-spec";
 
 function candidateFontDirs(): string[] {
   const dirs: string[] = [];
@@ -26,7 +36,7 @@ function candidateFontDirs(): string[] {
     const here = dirname(fileURLToPath(import.meta.url));
     dirs.push(join(here, "fonts"));
   } catch {
-    /* webpack transform â€” ignore */
+    /* webpack transform - ignore */
   }
   return dirs;
 }
@@ -45,46 +55,43 @@ function resolveFontDir(): string | null {
 
 export const FONTS_DIR: string | null = resolveFontDir();
 
+type FontSpec = { file: string; family: string };
+
+const SPECS: FontSpec[] = [
+  /* Arabic (ayah text @400; Amiri Bold + Naskh Bold for faux-bold-free faces) */
+  { file: "amiri.ttf", family: "Amiri" },
+  { file: "amiri-bold.ttf", family: "Amiri" },
+  { file: "scholarazade.ttf", family: "Scheherazade New" },
+  { file: "naskh-var.ttf", family: "Noto Naskh Arabic" },
+  { file: "notonaskharabic-700.ttf", family: "Noto Naskh Arabic" },
+  { file: "notokufi-arabic-400.ttf", family: "Noto Kufi Arabic" },
+  { file: "cairo-400.ttf", family: "Cairo" },
+  { file: "tajawal-400.ttf", family: "Tajawal" },
+  { file: "lateef-400.ttf", family: "Lateef" },
+  { file: "reemkufi-400.ttf", family: "Reem Kufi" },
+  /* Translation (drawn at weight 600) */
+  { file: "inter-600.ttf", family: "Inter" },
+  { file: "poppins-600.ttf", family: "Poppins" },
+  { file: "jetbrainsmono-600.ttf", family: "JetBrains Mono" },
+  { file: "gelasio-600.ttf", family: "Georgia" },
+  { file: "lato-700.ttf", family: "Lato" },
+  { file: "playfairdisplay-600.ttf", family: "Playfair Display" },
+  { file: "merriweather-600.ttf", family: "Merriweather" },
+  { file: "nunito-600.ttf", family: "Nunito" },
+];
+
 let registered = false;
 
 export function ensureFonts(): void {
   if (registered) return;
   if (!FONTS_DIR) {
     throw new Error(
-      "Font binaries not found â€” expected lib/server/server-canvas/fonts in the bundle",
+      "Font binaries not found - expected lib/server/server-canvas/fonts in the bundle",
     );
   }
-  /* Register all families with all their required weights */
-  for (const family of ALL_CANVAS_FAMILIES) {
-    const weights = getServerWeights(family);
-    for (const weight of weights) {
-      const fileName = weight === "400" 
-        ? `${family.toLowerCase().replace(/\s+/g, "-")}.ttf`
-        : `${family.toLowerCase().replace(/\s+/g, "-")}-${weight}.ttf`;
-      try {
-        const data = readFileSync(join(FONTS_DIR, fileName));
-        GlobalFonts.register(data, family);
-      } catch {
-        /* font file may not exist for every weight â€” try common naming */
-        try {
-          const altName = family.toLowerCase().replace(/\s+/g, "-");
-          const altFile = weight === "400" 
-            ? `${altName}.ttf` 
-            : `${altName}-${weight}.ttf`;
-          const data = readFileSync(join(FONTS_DIR, altFile));
-          GlobalFonts.register(data, family);
-        } catch {
-          console.warn(`[fonts] Could not load ${family} ${weight}`);
-        }
-      }
-    }
-  }
-  /* Also register Amiri Bold under "Amiri" for bold fallback */
-  try {
-    const bold = readFileSync(join(FONTS_DIR, "amiri-bold.ttf"));
-    GlobalFonts.register(bold, "Amiri");
-  } catch {
-    /* best-effort */
+  for (const spec of SPECS) {
+    const data = readFileSync(join(FONTS_DIR, spec.file));
+    GlobalFonts.register(data, spec.family);
   }
   registered = true;
 }

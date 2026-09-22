@@ -164,6 +164,9 @@ export async function POST(request: Request) {
   if (!["small", "medium", "large"].includes(String(st.fontSize))) {
     st.fontSize = "medium";
   }
+  if (!["none", "fade", "slide", "scale"].includes(String(st.transitionStyle))) {
+    st.transitionStyle = "fade";
+  }
   if (typeof st.fontFamily !== "string" || !st.fontFamily) {
     st.fontFamily = "'Amiri', serif";
   }

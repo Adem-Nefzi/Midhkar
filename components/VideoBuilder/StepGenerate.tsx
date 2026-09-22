@@ -398,15 +398,19 @@ export function StepGenerate({
               </div>
             </div>
             <p>
-              {ar
-                ? "يستخدم WebCodecs API — تشفير بالمعالج الرسومي، بدون تحميل إضافي."
-                : "Native WebCodecs API — GPU-accelerated H.264, no extra downloads."}
+              {fr
+                ? "Rendu dans le cloud — rien à installer, léger pour votre appareil."
+                : ar
+                  ? "يتم التوليد في السحابة — بدون تحميلات إضافية، وبأقل استهلاك لجهازك."
+                  : "Renders in the cloud — nothing to install, light on your device."}
             </p>
             {webCodecsSupported === false && (
               <p className="mt-1 text-red-400/90">
-                {ar
-                  ? "متصفحك لا يدعم WebCodecs. استخدم Chrome أو Edge 94+."
-                  : "WebCodecs not supported. Use Chrome or Edge 94+."}
+                {fr
+                  ? "Replique local indisponible (WebCodecs nécessite Chrome ou Edge 94+). Le rendu cloud fonctionne toujours."
+                  : ar
+                    ? "النسخة المحلية غير متاحة (يتطلب WebCodecs متصفح Chrome أو Edge 94+). التوليد السحابي يعمل على أي حال."
+                    : "Local fallback unavailable (WebCodecs needs Chrome or Edge 94+). Cloud rendering still works."}
               </p>
             )}
           </div>

@@ -19,7 +19,7 @@ import {
 } from "./server-canvas/canva-utils";
 import type { RenderPlanSpec, RenderChunk } from "@/lib/render-plan";
 import type { VideoSettings } from "./server-canvas/types-settings";
-import { applyAyahDeclick, applyBookendFades, raisedCosineFade } from "@/lib/audio-fades";
+import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
 
 const RENDER_FPS = 30;
 const TRANSITION_WINDOW_FRAMES = 8;
@@ -327,28 +327,27 @@ function buildSegments(
   return { segments, totalFrames };
 }
 
-function transitionFor(
-  segIdx: number,
-  segments: Segment[],
+/* Crossfade boundary AFTER a segment — mirrors encode.worker.ts
+ * computeBoundaries. trailFrames is uniform across segments
+ * (round(verseSpacing * fps); segment totals always exceed it), so
+ * both sides of a chunk seam compute the SAME {pre, post} and the
+ * crossfade stitches losslessly across concat.
+ *   trail >= TW  -> whole window in the earlier verse's silence
+ *   0 < trail<TW -> use the silence, remainder from the next verse
+ *   trail = 0    -> split evenly across the hard cut
+ * (The old nextLead branch returned {pre:0, post:8} for trail=0 —
+ * a window that starts past the segment end, so ZERO frames ever
+ * rendered: hard cut on every verse.) */
+function boundaryFor(
+  trailFrames: number,
   transitionStyle: string,
 ): { pre: number; post: number } {
-  if (transitionStyle === "none" || segIdx >= segments.length - 1) {
-    return { pre: 0, post: 0 };
-  }
-  const trail = segments[segIdx].trailFrames;
-  const nextLead = Math.max(
-    0,
-    segments[segIdx + 1].totalFrames - segments[segIdx + 1].trailFrames,
-  );
-  if (trail >= TRANSITION_WINDOW_FRAMES) {
-    return { pre: TRANSITION_WINDOW_FRAMES, post: 0 };
-  } else if (trail + nextLead >= TRANSITION_WINDOW_FRAMES) {
-    return { pre: trail, post: TRANSITION_WINDOW_FRAMES - trail };
-  }
-  return {
-    pre: Math.floor(TRANSITION_WINDOW_FRAMES / 2),
-    post: TRANSITION_WINDOW_FRAMES - Math.floor(TRANSITION_WINDOW_FRAMES / 2),
-  };
+  if (transitionStyle === "none") return { pre: 0, post: 0 };
+  const TW = TRANSITION_WINDOW_FRAMES;
+  const trail = Math.max(0, trailFrames);
+  if (trail >= TW) return { pre: TW, post: 0 };
+  if (trail > 0) return { pre: trail, post: TW - trail };
+  return { pre: Math.floor(TW / 2), post: TW - Math.floor(TW / 2) };
 }
 
 /* â”€â”€ The chunk render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -407,6 +406,11 @@ export async function renderChunk(
       typeof rawS.translationFontFamily === "string" && rawS.translationFontFamily
         ? rawS.translationFontFamily
         : "'Inter', sans-serif",
+    transitionStyle: (["none", "fade", "slide", "scale"] as const).includes(
+      rawS.transitionStyle as "fade",
+    )
+      ? rawS.transitionStyle
+      : "fade",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;
@@ -449,50 +453,13 @@ let samples: Float32Array;
     );
   }
 
-  const CROSSFADE_SAMPLES = Math.round(0.080 * SAMPLE_RATE); // 20ms crossfade
-  const CROSSFADE_IN = raisedCosineFade(CROSSFADE_SAMPLES, "in");
-  const CROSSFADE_OUT = raisedCosineFade(CROSSFADE_SAMPLES, "out");
-
   const totalDurSec = durations.reduce((a, d) => a + d.totalSec + d.trailSec, 0);
   const totalSamples = Math.round(totalDurSec * SAMPLE_RATE);
   const track = new Float32Array(totalSamples);
   let offset = 0;
-
   for (let i = 0; i < buffers.length; i++) {
-    const src = buffers[i];
-    const srcLen = src.length;
-    const isFirst = i === 0;
-    const isLast = i === buffers.length - 1;
-
-    const crossfadeLen = isFirst ? 0 : CROSSFADE_SAMPLES;
-    const crossfadeIn = !isFirst ? CROSSFADE_IN : null;
-    const crossfadeOutLen = i < buffers.length - 1 ? CROSSFADE_SAMPLES : 0;
-
-    // Apply crossfade-in at start (except first)
-    if (!isFirst) {
-      const fadeLen = Math.min(CROSSFADE_SAMPLES, srcLen);
-      for (let k = 0; k < crossfadeLen; k++) {
-        track[offset + k] *= CROSSFADE_IN[k];
-      }
-    }
-
-    // Write main body (excluding crossfade-out portion)
-    const writeLen = srcLen - (isLast ? 0 : CROSSFADE_SAMPLES);
-    track.set(src.subarray(0, writeLen), offset);
-    offset += writeLen;
-
-    // Apply crossfade-out at end (except last)
-    if (!isLast) {
-      const fadeOutStart = srcLen - CROSSFADE_SAMPLES;
-      for (let k = 0; k < CROSSFADE_SAMPLES; k++) {
-        if (fadeOutStart + k < srcLen) {
-          track[offset + k] *= CROSSFADE_OUT[k];
-        }
-      }
-      offset += crossfadeLen;
-    }
-
-    offset += srcLen + Math.round(durations[i].trailSec * SAMPLE_RATE);
+    track.set(buffers[i], offset);
+    offset += buffers[i].length + Math.round(durations[i].trailSec * SAMPLE_RATE);
   }
 
   /* Apply bookend fades to the full audio track (match video bookend fades) */
@@ -586,9 +553,12 @@ let samples: Float32Array;
     numberOfAyahs: spec.ayahs.length,
     revelationType: "Meccan",
   };
-  const overlayImages: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
-  for (let i = 0; i < ayahs.length; i++) {
-    if (signal.aborted) throw new Error("Aborted");
+  const transitionStyle = s.transitionStyle;
+  const transitionEnabled = transitionStyle !== "none";
+
+  const renderOverlay = async (
+    ayah: (typeof ayahs)[number],
+  ): Promise<Awaited<ReturnType<typeof loadImage>>> => {
     const canvas = createCanvas(cw, ch);
     const ctx = canvas.getContext("2d");
     /* Video backgrounds keep the overlay transparent; static bgs bake
@@ -618,9 +588,9 @@ let samples: Float32Array;
       canvas as unknown as HTMLCanvasElement,
       {
         number: 0,
-        numberInSurah: ayahs[i].numberInSurah,
-        text: ayahs[i].text,
-        translation: ayahs[i].translation,
+        numberInSurah: ayah.numberInSurah,
+        text: ayah.text,
+        translation: ayah.translation,
         juz: 0,
         page: 0,
         sajda: false,
@@ -629,11 +599,30 @@ let samples: Float32Array;
       s,
       1,
     );
-    overlayImages.push(await loadImage(canvas.toBuffer("image/png")));
+    return loadImage(canvas.toBuffer("image/png"));
+  };
+
+  const overlayImages: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
+  for (let i = 0; i < ayahs.length; i++) {
+    if (signal.aborted) throw new Error("Aborted");
+    overlayImages.push(await renderOverlay(ayahs[i]));
     onProgress(
       `Rendering overlay ${i + 1}/${ayahs.length}`,
       36 + Math.round(((i + 1) / ayahs.length) * 8),
     );
+  }
+
+  /* Chunk-seam neighbours: the verse crossfade AT a chunk boundary
+     needs the verse just OUTSIDE this chunk so the fade continues
+     across concat (previous chunk renders the outgoing half with the
+     same boundary math — t stays continuous). */
+  let prevOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
+  let nextOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
+  if (transitionEnabled && chunk.from > 0) {
+    prevOverlay = await renderOverlay(spec.ayahs[chunk.from - 1]);
+  }
+  if (transitionEnabled && chunk.to + 1 < spec.ayahs.length) {
+    nextOverlay = await renderOverlay(spec.ayahs[chunk.to + 1]);
   }
 
   /* 5. Composite + encode via FFmpeg pipe */
@@ -743,14 +732,42 @@ let samples: Float32Array;
     return img;
   };
 
-  const transitionStyle = s.transitionStyle as string;
   const isFirstChild = chunkIndex === 0;
   const isLastChild = chunkIndex === chunkCount - 1;
+
+  /* Crossfade boundary AFTER each segment. The last segment of the
+     chunk still gets one when a next verse exists globally (the
+     chunk seam) — the neighbour overlay renders the other half. */
+  const boundaries: ({ pre: number; post: number } | null)[] = segments.map(
+    (seg, i) => {
+      if (!transitionEnabled) return null;
+      const isLastSeg = i === segments.length - 1;
+      if (!isLastSeg || chunk.to + 1 < spec.ayahs.length) {
+        return boundaryFor(seg.trailFrames, transitionStyle);
+      }
+      return null;
+    },
+  );
 
   let segStart = 0;
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     const seg = segments[segIdx];
-    const trans = transitionFor(segIdx, segments, transitionStyle);
+    /* Incoming crossfade from the previous verse: previous segment
+       inside this chunk, or the chunk-seam neighbour for segment 0.
+       Boundary math is identical on both sides of the seam (uniform
+       trail), so t stays continuous across concat. */
+    const inB =
+      segIdx > 0
+        ? boundaries[segIdx - 1]
+        : transitionEnabled && prevOverlay
+          ? boundaryFor(seg.trailFrames, transitionStyle)
+          : null;
+    const outB = boundaries[segIdx];
+    const outgoingPre = outB ? Math.min(outB.pre, seg.totalFrames) : 0;
+    const incomingPost = inB
+      ? Math.min(inB.post, Math.max(0, seg.totalFrames - outgoingPre))
+      : 0;
+
     for (let k = 0; k < seg.totalFrames; k++) {
       if (signal.aborted) throw new Error("Aborted");
       cctx.clearRect(0, 0, cw, ch);
@@ -809,26 +826,56 @@ let samples: Float32Array;
         drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch);
       }
 
-      const localEnd = seg.totalFrames - 1;
+      /* Verse crossfade — same math as encode.worker.ts: continuous t
+         over incoming (segment start) and outgoing (segment end)
+         windows, alphas sum to ~1, slide/scale transform rides the
+         incoming verse. Windows never overlap the neighbour's (the
+         other chunk renders its half with the same boundary). */
+      let crossfade = false;
       let oldAlpha = 1;
-      let newAlpha = 0;
-      const newIdx = segIdx + 1;
-      if (transitionStyle !== "none" && segIdx < segments.length - 1) {
-        const totalW = trans.pre + trans.post;
-        if (totalW > 0) {
-          const pos = k - (localEnd - trans.pre + 1);
-          if (pos >= 0 && pos < totalW) {
-            const t = (pos + 1) / (totalW + 1);
-            oldAlpha = 1 - t;
-            newAlpha = t;
-          }
+      let newAlpha = 1;
+      let transformT = 1;
+      let oldImg: (Awaited<ReturnType<typeof loadImage>> | null) = null;
+      let newImg: (Awaited<ReturnType<typeof loadImage>> | null) =
+        overlayImages[segIdx];
+
+      if (incomingPost > 0 && k < incomingPost) {
+        const prev =
+          segIdx > 0 ? overlayImages[segIdx - 1] : prevOverlay;
+        if (prev && inB) {
+          const totalW = inB.pre + inB.post;
+          const t = (inB.pre + k + 1) / (totalW + 1);
+          oldImg = prev;
+          oldAlpha = 1 - t;
+          newAlpha = t;
+          transformT = t;
+          crossfade = true;
+        }
+      } else if (
+        outgoingPre > 0 &&
+        k >= seg.totalFrames - outgoingPre
+      ) {
+        const next =
+          segIdx < segments.length - 1
+            ? overlayImages[segIdx + 1]
+            : nextOverlay;
+        if (next && outB) {
+          const totalW = outB.pre + outB.post;
+          const t =
+            (k - (seg.totalFrames - outgoingPre) + 1) / (totalW + 1);
+          oldImg = overlayImages[segIdx];
+          oldAlpha = 1 - t;
+          newImg = next;
+          newAlpha = t;
+          transformT = t;
+          crossfade = true;
         }
       }
 
-      /* Bookend fades only at the true start/end of the whole video â€”
+      /* Bookend fades only at the true start/end of the whole video —
          chunk seams stay flat or the seams would visibly pulse. */
       let bookend = 1;
-      if (transitionStyle !== "none") {
+      if (transitionEnabled) {
         const globalIdx = segStart + k;
         if (isFirstChild && globalIdx < BOOKEND_FADE_FRAMES) {
           bookend = (globalIdx + 1) / (BOOKEND_FADE_FRAMES + 1);
@@ -839,14 +886,15 @@ let samples: Float32Array;
         }
       }
 
-      drawOverlayImg(overlayImages[segIdx], oldAlpha * bookend, 0, 1);
-      if (newAlpha > 0 && newIdx < overlayImages.length) {
-        const t = newAlpha;
+      if (crossfade) {
+        drawOverlayImg(oldImg, oldAlpha * bookend, 0, 1);
         let dy = 0;
         let scale = 1;
-        if (transitionStyle === "slide") dy = (1 - t) * 40;
-        if (transitionStyle === "scale") scale = 0.95 + t * 0.05;
-        drawOverlayImg(overlayImages[newIdx], newAlpha * bookend, dy, scale);
+        if (transitionStyle === "slide") dy = (1 - transformT) * 40;
+        if (transitionStyle === "scale") scale = 0.95 + transformT * 0.05;
+        drawOverlayImg(newImg, newAlpha * bookend, dy, scale);
+      } else {
+        drawOverlayImg(overlayImages[segIdx], bookend, 0, 1);
       }
 
       if (s.showWatermark && typeof s.watermarkText === "string" && s.watermarkText.trim()) {
