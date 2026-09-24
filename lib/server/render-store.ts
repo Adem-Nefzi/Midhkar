@@ -131,7 +131,7 @@ class BlobStore implements RenderStore {
 }
 
 /* ── Disk backend (dev only) ───────────────────────────────────── */
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -153,7 +153,14 @@ class DiskStore implements RenderStore {
   }
 
   async exists(path: string): Promise<boolean> {
-    return (await this.get(path)) !== null;
+    /* access() only — the old get() read the whole file just to learn
+       it exists (status/finalize do this per chunk). */
+    try {
+      await access(join(DISK_ROOT, path));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async delete(prefix: string): Promise<void> {

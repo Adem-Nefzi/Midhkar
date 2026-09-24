@@ -546,6 +546,10 @@ export async function generateVideo(params: {
             ? ((await decodeAndResample(rawBuffer)) ??
               silenceSamples(FALLBACK_DUR))
             : silenceSamples(FALLBACK_DUR);
+        } else {
+          /* applyAyahDeclick mutates in place — never touch the LRU's
+             buffer or the 2nd generation squares the fade windows. */
+          samples = samples.slice();
         }
 
         applyAyahDeclick(samples);
@@ -558,7 +562,6 @@ export async function generateVideo(params: {
       },
       AUDIO_CONCURRENCY,
     );
-    releaseAudioContext();
 
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 

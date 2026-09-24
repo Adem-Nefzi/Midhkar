@@ -29,14 +29,16 @@ export async function GET(request: Request) {
   }
   const plan = JSON.parse(Buffer.from(specBytes).toString("utf-8")) as RenderPlan;
 
-  const done: boolean[] = [];
-  for (let i = 0; i < plan.chunks.length; i++) {
-    done.push(await renderStore.exists(renderPaths.chunk(jobId, i)));
-  }
+  const [done, finalized] = await Promise.all([
+    Promise.all(
+      plan.chunks.map((_, i) => renderStore.exists(renderPaths.chunk(jobId, i))),
+    ),
+    renderStore.exists(renderPaths.final(jobId)),
+  ]);
   return NextResponse.json({
     jobId,
     chunks: plan.chunks.length,
     done,
-    finalized: await renderStore.exists(renderPaths.final(jobId)),
+    finalized,
   });
 }

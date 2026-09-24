@@ -289,59 +289,96 @@ export async function renderVideoCloud(
       await uploadBgFile(job.jobId, bgFile, onLog, ctrl.signal);
     }
 
-    /* 2. Chunks (sequential; idempotent per chunk) */
+    /* 2. Chunks — 2-way parallel (idempotent per chunk). One 422
+     * bg_unavailable gates the shared relay: every in-flight chunk
+     * awaits the same relay promise, then retries with the result. */
+    const CHUNK_PARALLEL = 2;
     const chunkSpan = 90 / job.chunks; // 5% → 95%
-    let bgRelayed = false; /* loop-guard: relay at most once per job */
-    for (let i = 0; i < job.chunks; i++) {
+    let chunksDone = 0;
+    let relayMode: "relayed" | "nobg" | null = null;
+    let relayPromise: Promise<void> | null = null;
+    const ensureRelayed = (): Promise<void> => {
+      if (relayMode) return Promise.resolve();
+      if (!relayPromise) {
+        relayPromise = (async () => {
+          onLog(
+            "Server can't reach the background library — relaying from your browser…",
+            5,
+          );
+          const ok = spec.bg.urls?.length
+            ? await relayBgPlaylist(
+                job.jobId,
+                spec.bg.urls.slice(0, 6),
+                onLog,
+                ctrl.signal,
+              )
+            : false;
+          relayMode = ok ? "relayed" : "nobg";
+          if (!ok) {
+            onLog(
+              "Background relay failed — rendering with gradient background…",
+              5,
+            );
+          }
+        })();
+      }
+      return relayPromise;
+    };
+
+    const postChunk = async (i: number): Promise<Response> => {
+      const extra =
+        relayMode === "relayed"
+          ? { bgRelayed: true }
+          : relayMode === "nobg"
+            ? { noBg: true }
+            : {};
+      return fetch(`${API}/chunk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.jobId, chunk: i, ...extra }),
+        signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
+      });
+    };
+
+    const runChunk = async (i: number): Promise<void> => {
       if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
       onLog(
         `Rendering part ${i + 1}/${job.chunks} on the server…`,
-        Math.round(5 + i * chunkSpan),
+        Math.round(5 + chunksDone * chunkSpan),
       );
-      let res = await fetch(`${API}/chunk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed }),
-        signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
-      });
+      let res = await postChunk(i);
 
       /* 422 bg_unavailable: the Vercel datacenter IP is blocked by the
        * bg CDN (Pexels/Cloudflare 403). The BROWSER can fetch it fine
-       * — relay the bytes and retry this chunk once. */
-      if (res.status === 422 && !bgRelayed && spec.bg.urls?.length) {
-        bgRelayed = true;
-        onLog("Server can't reach the background library — relaying from your browser…", 5);
-        const ok = await relayBgPlaylist(
-          job.jobId,
-          spec.bg.urls.slice(0, 6),
-          onLog,
-          ctrl.signal,
-        );
-        if (!ok) {
-          onLog("Background relay failed — rendering with gradient background…", 5);
-          /* Explicit noBg: skip the CDN entirely (gradient fallback
-           * server-side) — no second BgUnavailableError loop. */
-          res = await fetch(`${API}/chunk`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId: job.jobId, chunk: i, noBg: true }),
-            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
-          });
-        } else {
-          res = await fetch(`${API}/chunk`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed: true }),
-            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
-          });
-        }
+       * — relay the bytes once, then retry this chunk. */
+      if (res.status === 422 && !relayMode && spec.bg.urls?.length) {
+        await ensureRelayed();
+        res = await postChunk(i);
       }
 
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || `Chunk render failed (${res.status})`);
       }
-    }
+      chunksDone++;
+      onLog(
+        `Rendering part ${chunksDone}/${job.chunks} on the server…`,
+        Math.round(5 + chunksDone * chunkSpan),
+      );
+    };
+
+    let nextChunk = 0;
+    const workerCount = Math.min(CHUNK_PARALLEL, job.chunks);
+    await Promise.all(
+      Array.from({ length: workerCount }, async () => {
+        for (;;) {
+          if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+          const i = nextChunk++;
+          if (i >= job.chunks) break;
+          await runChunk(i);
+        }
+      }),
+    );
 
     /* 3. Finalize (lossless concat + faststart) */
     if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");

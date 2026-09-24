@@ -5,7 +5,7 @@
  * ladder, x264 memory-diet profile). Identical encode parameters on
  * every chunk â†’ the MP4s concat losslessly.
  */
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -30,6 +30,25 @@ const SAMPLE_RATE = 48000;
 const AUDIO_BITRATE = 160_000;
 
 type ProgressFn = (msg: string, pct: number) => void;
+
+/** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) break;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
 
 /* Audio fetch + decode to mono 48kHz PCM */
 
@@ -114,8 +133,15 @@ function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
         reject(new Error("audio decode produced no samples"));
         return;
       }
-      const samples = new Float32Array(buf.length / 4);
-      for (let i = 0; i < samples.length; i++) samples[i] = buf.readFloatLE(i * 4);
+      const n = buf.length >>> 2;
+      /* Zero-copy view when the buffer is 4-byte aligned (Buffer.concat
+       * usually is); one bulk copy otherwise — never a per-sample loop. */
+      if ((buf.byteOffset & 3) === 0) {
+        resolve(new Float32Array(buf.buffer, buf.byteOffset, n));
+        return;
+      }
+      const samples = new Float32Array(n);
+      buf.copy(Buffer.from(samples.buffer, 0, n * 4), 0, 0, n * 4);
       resolve(samples);
     });
     proc.stdin.end(input);
@@ -152,8 +178,10 @@ function extractBgFrames(
   const args = [
     "-v", "error",
     ...inputArgs,
-    "-vf", `${scale},crop=${cw}:${ch}`,
-    "-fps_mode", "vfr",
+    /* fps= RENDER_FPS before -frames:v: time-based resample so a 60fps
+     * source still covers maxFrames/30 seconds (frame-count-only
+     * extraction used to grab half the timeline at 2× slow-mo). */
+    "-vf", `${scale},crop=${cw}:${ch},fps=${RENDER_FPS}`,
     "-frames:v", String(maxFrames),
     "-f", "image2pipe",
     "-vcodec", "mjpeg",
@@ -416,42 +444,45 @@ export async function renderChunk(
   const outputFps = spec.quality.isLowPower ? 30 : 60;
   const bitrate = videoBitrate(cw, ch, spec.quality.isLowPower);
 
-  /* 1. Audio */
+  /* 1. Audio — fetch+decode concurrent (order preserved by mapLimit) */
   const surahNo = Number(spec.surah.number);
   const verseSpacing = (s.verseSpacing as number) || 0;
   const ayahs = spec.ayahs.slice(chunk.from, chunk.to + 1);
-  const buffers: Float32Array[] = [];
-  const durations: { totalSec: number; trailSec: number }[] = [];
-  for (let i = 0; i < ayahs.length; i++) {
+  let audioDone = 0;
+  const buffers = await mapLimit(ayahs, 3, async (ayah) => {
     if (signal.aborted) throw new Error("Aborted");
     const raw = await fetchAudioBuffer(
-      audioUrlCandidates(spec.reciter, surahNo, ayahs[i].numberInSurah),
+      audioUrlCandidates(spec.reciter, surahNo, ayah.numberInSurah),
     );
     if (!raw) {
       console.warn(
-        `[render] audio fetch failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence`,
+        `[render] audio fetch failed for ${spec.surah.number}:${ayah.numberInSurah} — using ${FALLBACK_DUR}s silence`,
       );
     }
-let samples: Float32Array;
+    let samples: Float32Array;
     try {
       samples = raw
         ? await decodeAudioPcm(raw)
         : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
     } catch (err) {
       console.warn(
-        `[render] audio decode failed for ${spec.surah.number}:${ayahs[i].numberInSurah} — using ${FALLBACK_DUR}s silence:`,
+        `[render] audio decode failed for ${spec.surah.number}:${ayah.numberInSurah} — using ${FALLBACK_DUR}s silence:`,
         err instanceof Error ? err.message : err,
       );
       samples = new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
     }
     applyAyahDeclick(samples);
-    buffers.push(samples);
-    durations.push({ totalSec: samples.length / SAMPLE_RATE, trailSec: verseSpacing });
+    audioDone++;
     onProgress(
-      `Audio ${i + 1}/${ayahs.length}`,
-      5 + Math.round(((i + 1) / ayahs.length) * 20),
+      `Audio ${audioDone}/${ayahs.length}`,
+      5 + Math.round((audioDone / ayahs.length) * 20),
     );
-  }
+    return samples;
+  });
+  const durations = buffers.map((samples) => ({
+    totalSec: samples.length / SAMPLE_RATE,
+    trailSec: verseSpacing,
+  }));
 
   const totalDurSec = durations.reduce((a, d) => a + d.totalSec + d.trailSec, 0);
   const totalSamples = Math.round(totalDurSec * SAMPLE_RATE);
@@ -491,18 +522,14 @@ let samples: Float32Array;
   if (bgUrlSources.length > 0) {
     const cap = spec.quality.isLowPower ? 1200 : 2400;
     const budget = Math.min(cap * bgUrlSources.length, totalFrames + 64, BG_HARD_CAP);
-    const durations2: number[] = [];
-    for (const u of bgUrlSources) {
-      if (typeof u === "string") {
-        try {
-          durations2.push(await probeDuration(u));
-        } catch {
-          durations2.push(0);
-        }
-      } else {
-        durations2.push(0); /* uploaded bytes — even split */
+    const durations2 = await mapLimit(bgUrlSources, 4, async (u) => {
+      if (typeof u !== "string") return 0; /* uploaded bytes — even split */
+      try {
+        return await probeDuration(u);
+      } catch {
+        return 0;
       }
-    }
+    });
     const known = durations2.filter((d) => d > 0);
     const alloc = durations2.map((d) => {
       if (known.length === 0) return Math.min(cap, Math.max(30, Math.floor(budget / durations2.length)));
@@ -510,13 +537,13 @@ let samples: Float32Array;
       const sum = known.reduce((a, b) => a + b, 0);
       return Math.max(30, Math.min(cap, Math.round((budget * d) / sum)));
     });
-    for (let i = 0; i < bgUrlSources.length; i++) {
+    let bgExtracted = 0;
+    const extracted = await mapLimit(bgUrlSources, 2, async (src, i) => {
       if (signal.aborted) throw new Error("Aborted");
-      onProgress(`Decoding backgrounds ${i + 1}/${bgUrlSources.length}…`, 34);
       let frames: Buffer[] | null = null;
       for (let attempt = 0; attempt < 2 && !frames; attempt++) {
         try {
-          frames = await extractBgFrames(bgUrlSources[i], cw, ch, alloc[i]);
+          frames = await extractBgFrames(src, cw, ch, alloc[i]);
           if (frames.length === 0) frames = null; /* 0 frames = failure */
         } catch (err) {
           if (attempt === 1) {
@@ -527,7 +554,15 @@ let samples: Float32Array;
           }
         }
       }
-      if (frames && frames.length > 0) bgFramesList.push(frames);
+      bgExtracted++;
+      onProgress(
+        `Decoding backgrounds ${bgExtracted}/${bgUrlSources.length}…`,
+        34,
+      );
+      return frames && frames.length > 0 ? frames : null;
+    });
+    for (const frames of extracted) {
+      if (frames) bgFramesList.push(frames);
     }
     if (bgFramesList.length === 0) {
       if (!bgWasRelayed && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0) {
@@ -556,9 +591,10 @@ let samples: Float32Array;
   const transitionStyle = s.transitionStyle;
   const transitionEnabled = transitionStyle !== "none";
 
-  const renderOverlay = async (
-    ayah: (typeof ayahs)[number],
-  ): Promise<Awaited<ReturnType<typeof loadImage>>> => {
+  /* Overlay source: napi-rs drawImage accepts a Canvas directly — skip
+     the PNG encode/decode roundtrip (~8MB→PNG→Image per verse). */
+  type OverlaySrc = Canvas;
+  const renderOverlay = async (ayah: (typeof ayahs)[number]): Promise<OverlaySrc> => {
     const canvas = createCanvas(cw, ch);
     const ctx = canvas.getContext("2d");
     /* Video backgrounds keep the overlay transparent; static bgs bake
@@ -599,10 +635,10 @@ let samples: Float32Array;
       s,
       1,
     );
-    return loadImage(canvas.toBuffer("image/png"));
+    return canvas;
   };
 
-  const overlayImages: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
+  const overlayImages: (OverlaySrc | null)[] = [];
   for (let i = 0; i < ayahs.length; i++) {
     if (signal.aborted) throw new Error("Aborted");
     overlayImages.push(await renderOverlay(ayahs[i]));
@@ -616,14 +652,37 @@ let samples: Float32Array;
      needs the verse just OUTSIDE this chunk so the fade continues
      across concat (previous chunk renders the outgoing half with the
      same boundary math — t stays continuous). */
-  let prevOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
-  let nextOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
+  let prevOverlay: OverlaySrc | null = null;
+  let nextOverlay: OverlaySrc | null = null;
   if (transitionEnabled && chunk.from > 0) {
     prevOverlay = await renderOverlay(spec.ayahs[chunk.from - 1]);
   }
   if (transitionEnabled && chunk.to + 1 < spec.ayahs.length) {
     nextOverlay = await renderOverlay(spec.ayahs[chunk.to + 1]);
   }
+
+  /* Hoist per-frame paints: gradient fallback + watermark are static
+     full-frame canvases — drawImage once per frame, never re-layout. */
+  const fallbackCanvas = createCanvas(cw, ch);
+  drawFallbackBg(
+    fallbackCanvas.getContext("2d") as unknown as CanvasRenderingContext2D,
+    cw,
+    ch,
+  );
+  const watermarkCanvas =
+    s.showWatermark && typeof s.watermarkText === "string" && s.watermarkText.trim()
+      ? (() => {
+          const wc = createCanvas(cw, ch);
+          drawWatermark(
+            wc.getContext("2d") as unknown as CanvasRenderingContext2D,
+            cw,
+            ch,
+            s.watermarkText,
+          );
+          return wc;
+        })()
+      : null;
+  const darkenFill = bgDarkenAlpha > 0 ? `rgba(0,0,0,${bgDarkenAlpha})` : null;
 
   /* 5. Composite + encode via FFmpeg pipe */
   onProgress("Encoding chunkâ€¦", 48);
@@ -634,16 +693,15 @@ let samples: Float32Array;
   );
   const audioPath = outPath.replace(/\.mp4$/, ".f32");
   await mkdir(dirname(outPath), { recursive: true });
-  {
-    const f32 = Buffer.alloc(track.length * 4);
-    for (let i = 0; i < track.length; i++) f32.writeFloatLE(track[i], i * 4);
-    await writeFile(audioPath, f32);
-  }
+  /* Zero-copy: Float32Array from new Float32Array(n) is byteOffset 0 —
+     Buffer.from(view) is a view, not a copy; writeFile reads the bytes. */
+  await writeFile(audioPath, Buffer.from(track.buffer, track.byteOffset, track.byteLength));
 
-  /* H.264 encode: capped-CRF for best quality within the bitrate cap,
-   * ref=2 + lookahead=12 for quality, bframes=0 for speed/stability.
-   * Level 4.2 for 1080×1920@60 (level 4.0 only supports 30fps at that res). */
-  const x264Params = `ref=2:rc-lookahead=12:bframes=0:threads=2`;
+  /* H.264 encode: preset faster @ CRF 18 — faster than default medium
+   * at CRF 20 with neutral-to-better quality (user-approved balance).
+   * bframes=0 + threads=2 keep the memory diet; identical on every
+   * chunk so concat stays lossless. Level 4.2 for 1080×1920@60. */
+  const x264Params = `ref=2:rc-lookahead=8:bframes=0:threads=2`;
   const args = [
     "-y",
     "-f", "rawvideo",
@@ -656,11 +714,12 @@ let samples: Float32Array;
     "-ac", "1",
     "-i", audioPath,
     "-c:v", "libx264",
+    "-preset", "faster",
     "-threads", "2",
     "-x264-params", x264Params,
     "-profile:v", "high",
     "-level", x264Level,
-    "-crf", "20",
+    "-crf", "18",
     "-maxrate", String(Math.round(bitrate * 1.45)),
     "-bufsize", String(bitrate * 2),
     "-g", String(2 * outputFps),
@@ -685,7 +744,7 @@ let samples: Float32Array;
   const cctx = composite.getContext("2d");
 
   const drawOverlayImg = (
-    img: Awaited<ReturnType<typeof loadImage>> | null,
+    img: OverlaySrc | null,
     alpha: number,
     dy: number,
     scale: number,
@@ -708,14 +767,20 @@ let samples: Float32Array;
    * first frame + a working set of recently used frames). */
   const BG_CACHE_SIZE = 24;
   const bgCache = new Map<string, Awaited<ReturnType<typeof loadImage>>>();
-  const bgDecode = async (clip: number, local: number) => {
+  /* Sync hit path — avoids an await on the hot loop when the frame is
+     already decoded (seams re-hit the same key constantly). */
+  const bgCacheGet = (clip: number, local: number) => {
     const key = `${clip}:${local}`;
     const hit = bgCache.get(key);
     if (hit) {
       bgCache.delete(key);
-      bgCache.set(key, hit); /* LRU refresh */
-      return hit;
+      bgCache.set(key, hit);
     }
+    return hit;
+  };
+  const bgDecode = async (clip: number, local: number) => {
+    const hit = bgCacheGet(clip, local);
+    if (hit) return hit;
     let img: Awaited<ReturnType<typeof loadImage>> | null = null;
     try {
       img = await loadImage(bgFramesList[clip][local]);
@@ -723,7 +788,7 @@ let samples: Float32Array;
       img = null;
     }
     if (img) {
-      bgCache.set(key, img);
+      bgCache.set(`${clip}:${local}`, img);
       if (bgCache.size > BG_CACHE_SIZE) {
         const oldest = bgCache.keys().next().value;
         if (oldest !== undefined) bgCache.delete(oldest);
@@ -795,7 +860,7 @@ let samples: Float32Array;
           local = bgFramesList[clip].length - 1;
         }
         const imgs = bgFramesList[clip];
-        const img = await bgDecode(clip, local);
+        const img = bgCacheGet(clip, local) ?? (await bgDecode(clip, local));
         if (img) {
           cctx.drawImage(img, 0, 0, cw, ch);
           const intoSeam = imgs.length - local;
@@ -805,7 +870,7 @@ let samples: Float32Array;
             intoSeam <= SEAM_FRAMES &&
             bgFramesList[nextClip].length > 0
           ) {
-            const next = await bgDecode(nextClip, 0);
+            const next = bgCacheGet(nextClip, 0) ?? (await bgDecode(nextClip, 0));
             if (next) {
               const t = (SEAM_FRAMES - intoSeam + 1) / (SEAM_FRAMES + 1);
               if (t < 1) {
@@ -816,14 +881,14 @@ let samples: Float32Array;
             }
           }
         } else {
-          drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch);
+          cctx.drawImage(fallbackCanvas, 0, 0);
         }
-        if (bgDarkenAlpha > 0) {
-          cctx.fillStyle = `rgba(0,0,0,${bgDarkenAlpha})`;
+        if (darkenFill) {
+          cctx.fillStyle = darkenFill;
           cctx.fillRect(0, 0, cw, ch);
         }
       } else {
-        drawFallbackBg(cctx as unknown as CanvasRenderingContext2D, cw, ch);
+        cctx.drawImage(fallbackCanvas, 0, 0);
       }
 
       /* Verse crossfade — same math as encode.worker.ts: continuous t
@@ -835,9 +900,8 @@ let samples: Float32Array;
       let oldAlpha = 1;
       let newAlpha = 1;
       let transformT = 1;
-      let oldImg: (Awaited<ReturnType<typeof loadImage>> | null) = null;
-      let newImg: (Awaited<ReturnType<typeof loadImage>> | null) =
-        overlayImages[segIdx];
+      let oldImg: OverlaySrc | null = null;
+      let newImg: OverlaySrc | null = overlayImages[segIdx];
 
       if (incomingPost > 0 && k < incomingPost) {
         const prev =
@@ -897,9 +961,7 @@ let samples: Float32Array;
         drawOverlayImg(overlayImages[segIdx], bookend, 0, 1);
       }
 
-      if (s.showWatermark && typeof s.watermarkText === "string" && s.watermarkText.trim()) {
-        drawWatermark(cctx as unknown as CanvasRenderingContext2D, cw, ch, s.watermarkText);
-      }
+      if (watermarkCanvas) cctx.drawImage(watermarkCanvas, 0, 0);
 
       /* A/V SYNC: write each unique frame ONCE. The rawvideo input is
        * declared RENDER_FPS (30) and the output -r outputFps (60) â€”

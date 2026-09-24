@@ -1,11 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import {
-  Marcellus,
-  Alegreya_Sans,
-  Aref_Ruqaa,
-  Amiri,
-  Noto_Naskh_Arabic,
-} from "next/font/google";
+import { Marcellus, Alegreya_Sans, Aref_Ruqaa } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { MotionProvider } from "@/components/MotionProvider";
@@ -29,20 +23,6 @@ const ruqaa = Aref_Ruqaa({
   subsets: ["arabic"],
   weight: ["400", "700"],
   variable: "--font-ruqaa",
-  display: "swap",
-});
-
-const amiri = Amiri({
-  subsets: ["arabic"],
-  weight: ["400", "700"],
-  variable: "--font-arabic",
-  display: "swap",
-});
-
-const naskh = Noto_Naskh_Arabic({
-  subsets: ["arabic"],
-  weight: ["400", "700"],
-  variable: "--font-naskh",
   display: "swap",
 });
 
@@ -160,7 +140,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${marcellus.variable} ${alegreya.variable} ${ruqaa.variable} ${amiri.variable} ${naskh.variable}`}
+      className={`${marcellus.variable} ${alegreya.variable} ${ruqaa.variable}`}
     >
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />

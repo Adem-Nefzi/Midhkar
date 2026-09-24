@@ -32,7 +32,9 @@ export async function GET(request: Request) {
   const bytes = await renderStore.get(renderPaths.final(jobId));
   if (!bytes) return bad("Video not ready", 404);
 
-  return new NextResponse(Buffer.from(bytes), {
+  /* Uint8Array is a valid BodyInit — skip Buffer.from(bytes) which
+     always copies the whole MP4. */
+  return new NextResponse(bytes as unknown as BodyInit, {
     headers: {
       "Content-Type": "video/mp4",
       "Content-Length": String(bytes.length),

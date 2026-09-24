@@ -42,7 +42,7 @@ const config: Config = {
         display: ["var(--font-display)", "system-ui", "sans-serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         ruqaa: ["var(--font-ruqaa)", "'Aref Ruqaa'", "serif"],
-        arabic: ["var(--font-arabic)", "'Scheherazade New'", "serif"],
+        arabic: ["'Scheherazade New'", "serif"],
       },
       animation: {
         "spin-slow": "spin 60s linear infinite",

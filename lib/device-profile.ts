@@ -14,7 +14,7 @@ export interface DeviceProfile {
 
 export function getDeviceProfile(): DeviceProfile {
   if (typeof navigator === "undefined") {
-    return { isLowPower: false, bitrateScale: 1, latencyMode: "realtime" };
+    return { isLowPower: false, bitrateScale: 1, latencyMode: "quality" };
   }
   const ua = navigator.userAgent || "";
   const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
@@ -27,7 +27,10 @@ export function getDeviceProfile(): DeviceProfile {
   return {
     isLowPower,
     bitrateScale: isLowPower ? 0.7 : 1,
-    latencyMode: "realtime",
+    /* Desktop: quality mode lets the encoder take its time for better
+       P-frames. Low-power mobile: realtime keeps encode from stalling
+       the main thread on weaker GPUs. */
+    latencyMode: isLowPower ? "realtime" : "quality",
   };
 }
 

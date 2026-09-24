@@ -45,22 +45,26 @@ export async function POST(request: Request) {
   if (!specBytes) return bad("Job not found (expired?)", 404);
   const plan = JSON.parse(Buffer.from(specBytes).toString("utf-8")) as RenderPlan;
 
-  /* All chunks must be present */
-  for (let i = 0; i < plan.chunks.length; i++) {
-    if (!(await renderStore.exists(renderPaths.chunk(jobId, i)))) {
-      return bad(`Missing chunk ${i}`, 409);
-    }
+  /* All chunks must be present (parallel heads) */
+  const present = await Promise.all(
+    plan.chunks.map((_, i) => renderStore.exists(renderPaths.chunk(jobId, i))),
+  );
+  for (let i = 0; i < present.length; i++) {
+    if (!present[i]) return bad(`Missing chunk ${i}`, 409);
   }
 
   /* Concat locally, then faststart */
   const listPath = join(tmpdir(), `midhkar-concat-${jobId}.txt`);
   const outPath = listPath.replace(/\.txt$/, ".mp4");
   try {
+    const chunkBytes = await Promise.all(
+      plan.chunks.map((_, i) => renderStore.get(renderPaths.chunk(jobId, i))),
+    );
     const lines: string[] = [];
-    for (let i = 0; i < plan.chunks.length; i++) {
-      const part = join(tmpdir(), `midhkar-part-${jobId}-${i}.mp4`);
-      const bytes = await renderStore.get(renderPaths.chunk(jobId, i));
+    for (let i = 0; i < chunkBytes.length; i++) {
+      const bytes = chunkBytes[i];
       if (!bytes) return bad(`Missing chunk ${i}`, 409);
+      const part = join(tmpdir(), `midhkar-part-${jobId}-${i}.mp4`);
       await writeFile(part, bytes);
       lines.push(`file '${part.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`);
     }

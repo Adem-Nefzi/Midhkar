@@ -81,7 +81,14 @@ export function StepGenerate({
     null,
   );
   useEffect(() => {
-    setWebCodecsSupported(typeof VideoEncoder !== "undefined");
+    /* Full check (VideoEncoder + AudioEncoder + VideoFrame + AudioData),
+       not just VideoEncoder — matches isWebCodecsSupported(). */
+    setWebCodecsSupported(
+      typeof VideoEncoder !== "undefined" &&
+        typeof AudioEncoder !== "undefined" &&
+        typeof VideoFrame !== "undefined" &&
+        typeof AudioData !== "undefined",
+    );
   }, []);
 
   useEffect(() => {
@@ -128,10 +135,9 @@ export function StepGenerate({
   const ar = locale === "ar";
   const fr = locale === "fr";
   const deviceProfile = getDeviceProfile();
-  const [encW, encH] = getOutputResolution(
-    platform.aspect,
-    deviceProfile.isLowPower,
-  );
+  /* Cloud render always ships HQ (`quality.isLowPower: false` in the
+     spec) and is the primary path — show the dims the user will get. */
+  const [encW, encH] = getOutputResolution(platform.aspect, false);
 
   const shareText = useMemo(() => {
     const range = `${sortedNums[0]}–${sortedNums[sortedNums.length - 1]}`;
