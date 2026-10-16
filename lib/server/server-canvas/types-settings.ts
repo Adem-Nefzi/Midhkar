@@ -23,8 +23,13 @@ export interface VideoSettings {
   bgOverlay: number;
   fontSize: "small" | "medium" | "large";
   overlayStyle: "none" | "linear" | "radial";
+  textGlowIntensity: number;
+  textShadowIntensity: number;
+  textOutlineWidth: number;
   showWatermark: boolean;
   watermarkText: string;
+  watermarkPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left";
+  exportQuality: "standard" | "balanced" | "high";
   textGlow: boolean;
   textOutline: boolean;
   frameStyle: "none" | "corners" | "full" | "arch";

@@ -33,9 +33,16 @@ export interface VideoSettings {
   bgOverlay: number;         // 0–80 %
   fontSize: "small" | "medium" | "large";
   overlayStyle: "none" | "linear" | "radial";
+  // Effect depth (professional controls)
+  textGlowIntensity: number;   // 0–100, scales glow blur/alpha
+  textShadowIntensity: number;  // 0–100, scales shadow blur/offset
+  textOutlineWidth: number;     // 1–5, scales outline stroke
   // Watermark
   showWatermark: boolean;
   watermarkText: string;
+  watermarkPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left";
+  // Export quality
+  exportQuality: "standard" | "balanced" | "high";
   // NEW: Text effects
   textGlow: boolean;          // golden glow behind Arabic text
   textOutline: boolean;       // thin outline around Arabic letters
@@ -88,8 +95,13 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   bgOverlay: 35,
   fontSize: "medium",
   overlayStyle: "linear",
+  textGlowIntensity: 100,
+  textShadowIntensity: 100,
+  textOutlineWidth: 3,
   showWatermark: false,
   watermarkText: "",
+  watermarkPosition: "bottom-right",
+  exportQuality: "balanced",
   textGlow: false,
   textOutline: false,
   frameStyle: "corners",
@@ -111,13 +123,21 @@ export const DEFAULT_SETTINGS: VideoSettings = {
 
 export const ARABIC_FONTS = [
   { id: "amiri",         name: "Amiri",           nameAr: "أميري",         family: "'Amiri', serif" },
+  { id: "amiri-quran",   name: "Amiri Quran",     nameAr: "أميري قرآن",    family: "'Amiri Quran', serif" },
   { id: "scheherazade",  name: "Scheherazade",     nameAr: "شهرزاد",        family: "'Scheherazade New', serif" },
   { id: "noto-naskh",   name: "Noto Naskh",       nameAr: "نوتو نسخ",      family: "'Noto Naskh Arabic', serif" },
   { id: "noto-kufi",    name: "Noto Kufi",        nameAr: "نوتو كوفي",     family: "'Noto Kufi Arabic', sans-serif" },
+  { id: "noto-sans-ar", name: "Noto Sans Arabic", nameAr: "نوتو سانس عربي",  family: "'Noto Sans Arabic', sans-serif" },
+  { id: "ibm-plex-ar",  name: "IBM Plex Arabic",  nameAr: "آي بي إم بليكس",   family: "'IBM Plex Sans Arabic', sans-serif" },
   { id: "cairo",        name: "Cairo",            nameAr: "القاهرة",       family: "'Cairo', sans-serif" },
   { id: "tajawal",      name: "Tajawal",          nameAr: "تجوال",         family: "'Tajawal', sans-serif" },
+  { id: "almarai",      name: "Almarai",          nameAr: "المرعي",        family: "'Almarai', sans-serif" },
+  { id: "changa",       name: "Changa",           nameAr: "تشانغا",        family: "'Changa', sans-serif" },
+  { id: "el-messiri",   name: "El Messiri",       nameAr: "المسيري",       family: "'El Messiri', sans-serif" },
+  { id: "markazi",      name: "Markazi Text",     nameAr: "مرکزي",         family: "'Markazi Text', serif" },
   { id: "lateef",       name: "Lateef",           nameAr: "لطيف",          family: "'Lateef', serif" },
   { id: "reem-kufi",    name: "Reem Kufi",        nameAr: "ريم كوفي",      family: "'Reem Kufi', sans-serif" },
+  { id: "aref-ruqaa",   name: "Aref Ruqaa",       nameAr: "عارف رقعة",     family: "'Aref Ruqaa', serif" },
 ] as const;
 
 /* ── Translation / Latin fonts ───────────────────────────────── */

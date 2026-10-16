@@ -411,6 +411,19 @@ export async function renderChunk(
     )
       ? rawS.transitionStyle
       : "fade",
+    textGlowIntensity: numOr(rawS.textGlowIntensity, 100),
+    textShadowIntensity: numOr(rawS.textShadowIntensity, 100),
+    textOutlineWidth: numOr(rawS.textOutlineWidth, 3),
+    watermarkPosition:
+      typeof rawS.watermarkPosition === "string" && rawS.watermarkPosition
+        ? rawS.watermarkPosition
+        : "bottom-right",
+    exportQuality:
+      rawS.exportQuality === "standard" ||
+      rawS.exportQuality === "balanced" ||
+      rawS.exportQuality === "high"
+        ? rawS.exportQuality
+        : "balanced",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
   const outputFps = spec.quality.isLowPower ? 30 : 60;
@@ -644,6 +657,12 @@ let samples: Float32Array;
    * ref=2 + lookahead=12 for quality, bframes=0 for speed/stability.
    * Level 4.2 for 1080×1920@60 (level 4.0 only supports 30fps at that res). */
   const x264Params = `ref=2:rc-lookahead=12:bframes=0:threads=2`;
+  const crf =
+    s.exportQuality === "high"
+      ? "17"
+      : s.exportQuality === "standard"
+        ? "23"
+        : "20";
   const args = [
     "-y",
     "-f", "rawvideo",
@@ -660,7 +679,7 @@ let samples: Float32Array;
     "-x264-params", x264Params,
     "-profile:v", "high",
     "-level", x264Level,
-    "-crf", "20",
+    "-crf", crf,
     "-maxrate", String(Math.round(bitrate * 1.45)),
     "-bufsize", String(bitrate * 2),
     "-g", String(2 * outputFps),
@@ -898,7 +917,7 @@ let samples: Float32Array;
       }
 
       if (s.showWatermark && typeof s.watermarkText === "string" && s.watermarkText.trim()) {
-        drawWatermark(cctx as unknown as CanvasRenderingContext2D, cw, ch, s.watermarkText);
+        drawWatermark(cctx as unknown as CanvasRenderingContext2D, cw, ch, s.watermarkText, s.watermarkPosition);
       }
 
       /* A/V SYNC: write each unique frame ONCE. The rawvideo input is

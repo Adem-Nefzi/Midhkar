@@ -114,6 +114,7 @@ export function LibrarySearch({
   onClear,
   totalSec,
   locale,
+  orientation = "portrait",
 }: {
   ar: boolean;
   fr: boolean;
@@ -123,6 +124,7 @@ export function LibrarySearch({
   onClear: () => void;
   totalSec: number | null;
   locale: string;
+  orientation?: string;
 }) {
   const [query, setQuery] = useState("nature");
   const [results, setResults] = useState<PexelsVideo[]>([]);
@@ -149,7 +151,7 @@ export function LibrarySearch({
       setLoading(true);
       setError(null);
       try {
-        const data = await searchPexelsVideos(q, p, ctrl.signal);
+        const data = await searchPexelsVideos(q, p, ctrl.signal, orientation);
         if (seq !== searchSeqRef.current) return;
         setResults((prev) => {
           const base = append ? prev : [];
@@ -172,7 +174,7 @@ export function LibrarySearch({
         if (seq === searchSeqRef.current) setLoading(false);
       }
     },
-    [],
+    [orientation],
   );
 
   useEffect(() => {

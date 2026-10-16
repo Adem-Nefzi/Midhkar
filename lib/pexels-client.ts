@@ -22,9 +22,10 @@ export async function searchPexelsVideos(
   query: string,
   page: number = 1,
   signal?: AbortSignal,
+  orientation: string = "portrait",
 ): Promise<PexelsSearchResult> {
   const res = await fetch(
-    `/api/pexels/search?query=${encodeURIComponent(query)}&page=${page}&per_page=30`,
+    `/api/pexels/search?query=${encodeURIComponent(query)}&page=${page}&per_page=30&orientation=${encodeURIComponent(orientation)}`,
     { signal },
   );
   if (!res.ok) {

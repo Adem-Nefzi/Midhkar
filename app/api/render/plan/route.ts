@@ -164,8 +164,18 @@ export async function POST(request: Request) {
   if (!["small", "medium", "large"].includes(String(st.fontSize))) {
     st.fontSize = "medium";
   }
-  if (!["none", "fade", "slide", "scale"].includes(String(st.transitionStyle))) {
-    st.transitionStyle = "fade";
+  st.textGlowIntensity = num(st.textGlowIntensity, 100, 0, 100);
+  st.textShadowIntensity = num(st.textShadowIntensity, 100, 0, 100);
+  st.textOutlineWidth = num(st.textOutlineWidth, 3, 1, 5);
+  if (
+    !["bottom-right", "bottom-left", "top-right", "top-left"].includes(
+      String(st.watermarkPosition),
+    )
+  ) {
+    st.watermarkPosition = "bottom-right";
+  }
+  if (!["standard", "balanced", "high"].includes(String(st.exportQuality))) {
+    st.exportQuality = "balanced";
   }
   if (typeof st.fontFamily !== "string" || !st.fontFamily) {
     st.fontFamily = "'Amiri', serif";

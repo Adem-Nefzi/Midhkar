@@ -659,6 +659,13 @@ export function StepSettings({
                   onClear={clearPlaylist}
                   totalSec={totalDurationSec}
                   locale={locale}
+                  orientation={
+                    settings.platform && (PLATFORM_META as any)[settings.platform]?.aspect === "16:9"
+                      ? "landscape"
+                      : settings.platform && (PLATFORM_META as any)[settings.platform]?.aspect === "1:1"
+                        ? "square"
+                        : "portrait"
+                  }
                 />
               )}
 
@@ -839,7 +846,7 @@ export function StepSettings({
                     {[
                       { id: "en", label: "English" },
                       { id: "fr", label: "Français" },
-                      { id: "ar", label: "عربي" },
+                      { id: "ar", label: "عربي (تفسير)" },
                     ].map((lang) => (
                       <ToggleBtn
                         key={lang.id}
@@ -853,22 +860,70 @@ export function StepSettings({
                 </Field>
               )}
 
-              {/* Watermark text */}
-              {settings.showWatermark && (
-                <Field label={L({ en: "Watermark Text", fr: "Texte du filigrane", ar: "نص العلامة المائية" })}>
-                  <input
-                    type="text"
-                    value={settings.watermarkText}
-                    onChange={(e) => onChange("watermarkText", e.target.value)}
-                    placeholder="@midhkar"
-                    className="w-full rounded-lg border border-gold/20 bg-ink-soft/40 px-3 py-2 text-sm text-parchment placeholder-parchment-dim outline-none transition focus:border-gold/40 focus:ring-1 focus:ring-gold/20"
-                  />
-                </Field>
-              )}
+               {/* Watermark text */}
+               {settings.showWatermark && (
+                 <>
+                   <Field label={L({ en: "Watermark Text", fr: "Texte du filigrane", ar: "نص العلامة المائية" })}>
+                     <input
+                       type="text"
+                       value={settings.watermarkText}
+                       onChange={(e) => onChange("watermarkText", e.target.value)}
+                       placeholder="@midhkar"
+                       className="w-full rounded-lg border border-gold/20 bg-ink-soft/40 px-3 py-2 text-sm text-parchment placeholder-parchment-dim outline-none transition focus:border-gold/40 focus:ring-1 focus:ring-gold/20"
+                     />
+                   </Field>
+                   <Field label={L({ en: "Watermark Position", fr: "Position du filigrane", ar: "موضع العلامة" })}>
+                     <div className="grid grid-cols-2 gap-2">
+                       {[
+                         { id: "bottom-right", label: "↘" },
+                         { id: "bottom-left", label: "↙" },
+                         { id: "top-right", label: "↗" },
+                         { id: "top-left", label: "↖" },
+                       ].map((p) => (
+                         <ToggleBtn
+                           key={p.id}
+                           active={settings.watermarkPosition === p.id}
+                           onClick={() => onChange("watermarkPosition", p.id as any)}
+                         >
+                           {p.label}
+                         </ToggleBtn>
+                       ))}
+                     </div>
+                   </Field>
+                 </>
+               )}
             </div>
           )}
 
-          {/* ── TAB: Text ──────────────────────────────────── */}
+              {/* Export quality */}
+              <Field label={L({ en: "Export Quality", fr: "Qualité d'export", ar: "جودة التصدير" })}>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: "standard", label: "Standard" },
+                      { id: "balanced", label: "Balanced" },
+                      { id: "high", label: "High" },
+                    ] as const
+                  ).map((q) => (
+                    <ToggleBtn
+                      key={q.id}
+                      active={settings.exportQuality === q.id}
+                      onClick={() => onChange("exportQuality", q.id as any)}
+                    >
+                      {q.label}
+                    </ToggleBtn>
+                  ))}
+                </div>
+                <p className="mt-1 text-[13px] text-parchment-muted/40">
+                  {L({
+                    en: "Higher quality takes longer to render",
+                    fr: "Une qualité supérieure prend plus de temps",
+                    ar: "جودة أعلى تستغرق وقتاً أطول",
+                  })}
+                </p>
+              </Field>
+
+              {/* ── TAB: Text ──────────────────────────────────── */}
           {tab === "text" && (
             <div className="animate-step-in space-y-5">
               {/* Font size */}
@@ -1020,7 +1075,7 @@ export function StepSettings({
 
                   <Field label={L({ en: "Translation Font", fr: "Police de traduction", ar: "خط الترجمة" })}>
                     <div className="grid grid-cols-2 gap-2">
-                      {LATIN_FONTS.map((f) => (
+                      {(settings.translationLang === "ar" ? ARABIC_FONTS : LATIN_FONTS).map((f: any) => (
                         <button
                           key={f.id}
                           onClick={() =>
@@ -1031,8 +1086,11 @@ export function StepSettings({
                           <p
                             className="text-sm text-parchment"
                             style={{ fontFamily: f.family }}
+                            dir={settings.translationLang === "ar" ? "rtl" : undefined}
                           >
-                            In the name
+                            {settings.translationLang === "ar"
+                              ? "بِسْمِ اللّٰهِ"
+                              : "In the name"}
                           </p>
                           <p className="mt-0.5 text-[13px] text-parchment-muted/60">
                             {f.name}
@@ -1177,6 +1235,60 @@ export function StepSettings({
                   ))}
                 </div>
               </Field>
+
+              {/* Effect depth sliders */}
+              {(settings.textGlow || settings.textShadow || settings.textOutline) && (
+                <div className="space-y-3 border-t border-gold/10 pt-3">
+                  {settings.textGlow && (
+                    <Field
+                      label={`${L({ en: "Glow Intensity", fr: "Intensité du halo", ar: "شدة التوهج" })}: ${settings.textGlowIntensity}%`}
+                    >
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={settings.textGlowIntensity}
+                        onChange={(e) =>
+                          onChange("textGlowIntensity", parseInt(e.target.value))
+                        }
+                        className="slider"
+                      />
+                    </Field>
+                  )}
+                  {settings.textShadow && (
+                    <Field
+                      label={`${L({ en: "Shadow Intensity", fr: "Intensité de l'ombre", ar: "شدة الظل" })}: ${settings.textShadowIntensity}%`}
+                    >
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={settings.textShadowIntensity}
+                        onChange={(e) =>
+                          onChange("textShadowIntensity", parseInt(e.target.value))
+                        }
+                        className="slider"
+                      />
+                    </Field>
+                  )}
+                  {settings.textOutline && (
+                    <Field
+                      label={`${L({ en: "Outline Width", fr: "Épaisseur du contour", ar: "سماكة الحد" })}: ${settings.textOutlineWidth}`}
+                    >
+                      <input
+                        type="range"
+                        min={1}
+                        max={5}
+                        value={settings.textOutlineWidth}
+                        onChange={(e) =>
+                          onChange("textOutlineWidth", parseInt(e.target.value))
+                        }
+                        className="slider"
+                      />
+                    </Field>
+                  )}
+                </div>
+              )}
 
               {/* Transition style */}
               <Field label={L({ en: "Verse Transition", fr: "Transition entre versets", ar: "انتقال بين الآيات" })}>

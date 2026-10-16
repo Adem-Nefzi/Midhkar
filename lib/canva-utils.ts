@@ -398,10 +398,11 @@ export function drawAyahFrame(
 
   // Glow effect (drawn before main text as a blurred shadow pass)
   if (s.textGlow) {
+    const glowI = Math.max(0, Math.min(100, s.textGlowIntensity ?? 100)) / 100;
     ctx.save();
     ctx.shadowColor = "#d4af37";
-    ctx.shadowBlur = 28;
-    ctx.globalAlpha = 0.5 * textAlpha;
+    ctx.shadowBlur = 28 * glowI;
+    ctx.globalAlpha = 0.5 * glowI * textAlpha;
     ctx.fillStyle = "#d4af37";
     block.arabicLines.forEach((line, i) => {
       const y = cursorY + i * block.arabicLineH + block.arabicLineH / 2;
@@ -412,9 +413,10 @@ export function drawAyahFrame(
 
   // Outline effect
   if (s.textOutline) {
+    const ow = Math.max(1, Math.min(5, s.textOutlineWidth ?? 3));
     ctx.save();
     ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.lineWidth = szArabic * 0.04;
+    ctx.lineWidth = szArabic * (ow * 0.013);
     ctx.lineJoin = "round";
     ctx.globalAlpha = (s.textOpacity / 100) * textAlpha;
     block.arabicLines.forEach((line, i) => {
@@ -425,11 +427,12 @@ export function drawAyahFrame(
   }
 
   // Main text shadow
-  if (s.textShadow) {
+  const shadowI = Math.max(0, Math.min(100, s.textShadowIntensity ?? 100)) / 100;
+  if (s.textShadow && shadowI > 0) {
     ctx.shadowColor = "rgba(0,0,0,0.9)";
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 3;
+    ctx.shadowBlur = 20 * shadowI;
+    ctx.shadowOffsetX = 2 * shadowI;
+    ctx.shadowOffsetY = 3 * shadowI;
   }
 
   ctx.globalAlpha = (s.textOpacity / 100) * textAlpha;
@@ -539,14 +542,23 @@ export function drawWatermark(
   cw: number,
   ch: number,
   text: string,
+  position: string = "bottom-right",
 ): void {
   ctx.save();
   ctx.font = `${Math.round(ch * 0.022)}px sans-serif`;
   ctx.fillStyle = "rgba(245,240,232,0.55)";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "bottom";
   const pad = Math.round(ch * 0.025);
-  ctx.fillText(text, cw - pad, ch - pad);
+  const xRight = cw - pad;
+  const xLeft = pad;
+  const yBottom = ch - pad;
+  const yTop = pad + Math.round(ch * 0.022);
+  const isLeft = position.includes("left");
+  const isTop = position.includes("top");
+  ctx.textAlign = isLeft ? "left" : "right";
+  ctx.textBaseline = isTop ? "top" : "bottom";
+  const x = isLeft ? xLeft : xRight;
+  const y = isTop ? yTop : yBottom;
+  ctx.fillText(text, x, y);
   ctx.restore();
 }
 
@@ -610,7 +622,7 @@ export function renderFullFrame(
     drawAyahFrame(ctx, canvas, ayah, surah, settings, 1);
     ctx.restore();
   }
-  if (settings.showWatermark && settings.watermarkText?.trim()) {
-    drawWatermark(ctx, w, h, settings.watermarkText);
-  }
+    if (settings.showWatermark && settings.watermarkText?.trim()) {
+      drawWatermark(ctx, w, h, settings.watermarkText, settings.watermarkPosition);
+    }
 }

@@ -50,8 +50,12 @@ export async function GET(request: Request) {
   const query = (searchParams.get("query") ?? "nature").trim().slice(0, MAX_QUERY_LEN) || "nature";
   const pageRaw = Number.parseInt(searchParams.get("page") ?? "1", 10);
   const page = Number.isInteger(pageRaw) ? Math.min(Math.max(pageRaw, 1), 50) : 1;
+  const orientationRaw = (searchParams.get("orientation") ?? "portrait").toLowerCase();
+  const orientation = ["portrait", "landscape", "square"].includes(orientationRaw)
+    ? orientationRaw
+    : "portrait";
 
-  const cacheKey = `${query}|${page}`;
+  const cacheKey = `${query}|${page}|${orientation}`;
   const cached = resultCache.get(cacheKey);
   if (cached && Date.now() - cached.at < RESULT_TTL_MS) {
     return NextResponse.json(cached.body, {
@@ -62,7 +66,7 @@ export async function GET(request: Request) {
   if (!globalUpstream.consume()) return rateLimited(60);
 
   try {
-    const url = `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(query)}&page=${page}&per_page=${PER_PAGE}&orientation=portrait`;
+    const url = `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(query)}&page=${page}&per_page=${PER_PAGE}&orientation=${orientation}`;
     const res = await fetch(url, {
       headers: { Authorization: PEXELS_API_KEY },
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),

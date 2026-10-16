@@ -401,9 +401,9 @@ async function renderAyahOverlays(
 
     drawOverlayStyle(ctx, cw, ch, settings.overlayStyle, settings.bgOverlay);
     drawAyahFrame(ctx, canvas, prepared[i].ayah, surah, settings);
-    if (settings.showWatermark && settings.watermarkText?.trim()) {
-      drawWatermark(ctx, cw, ch, settings.watermarkText);
-    }
+      if (settings.showWatermark && settings.watermarkText?.trim()) {
+        drawWatermark(ctx, cw, ch, settings.watermarkText, settings.watermarkPosition);
+      }
 
     batch.push(
       await createImageBitmap(canvas, { premultiplyAlpha: "none" }),
@@ -626,7 +626,7 @@ export async function generateVideo(params: {
       renderFps: FPS,
       outputFps: profile.isLowPower ? 30 : 60,
       videoBitrate: getVideoBitrate(cw, ch, profile),
-      audioBitrate: 128_000,
+      audioBitrate: 160_000,
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS,
       frameDurationS: 1 / FPS,

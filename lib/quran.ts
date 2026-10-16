@@ -216,16 +216,41 @@ export async function fetchAyahs(
   lang: string = "ar",
   signal?: AbortSignal,
 ): Promise<Ayah[]> {
-  const transId = TRANSLATION_IDS[lang] || 0;
+  const isAr = lang === "ar";
+  const transId = isAr ? 0 : (TRANSLATION_IDS[lang] || 0);
   const transParam = transId ? `&translations=${transId}` : "";
   const data = await fetchJson<any>(
     `${API_BASE}/verses/by_chapter/${surahNumber}?language=en&words=false&fields=text_uthmani,juz_number,page_number,sajdah_number${transParam}&page=1&per_page=300`,
     signal,
   );
   const verses = data.verses || [];
+
+  // Arabic "translation" = Tafsir Muyassar (resource 16), fetched per chapter.
+  const tafsirMap: Record<string, string> = {};
+  if (isAr) {
+    try {
+      const tData = await fetchJson<any>(
+        `${API_BASE}/tafsirs/16/by_chapter/${surahNumber}?per_page=300`,
+        signal,
+      );
+      for (const item of tData.tafsirs || []) {
+        const key = item.verse_key || "";
+        const txt = String(item.text || "").replace(/<[^>]+>/g, "").trim();
+        if (key) tafsirMap[key] = txt;
+      }
+    } catch {
+      /* fallback: empty translation */
+    }
+  }
+
   return verses.map((v: any) => {
     let translation = "";
-    if (transId) {
+    if (isAr) {
+      translation =
+        tafsirMap[v.verse_key] ||
+        tafsirMap[`${surahNumber}:${v.verse_number}`] ||
+        "";
+    } else if (transId) {
       const raw =
         v.translations?.[0]?.text ||
         v.translations?.find((t: any) => t.resource_id === transId)?.text ||
@@ -258,7 +283,8 @@ export async function fetchVerseByKey(
   lang: string,
   signal?: AbortSignal,
 ): Promise<VerseByKey | null> {
-  const transId = TRANSLATION_IDS[lang] || 0;
+  const isAr = lang === "ar";
+  const transId = isAr ? 0 : (TRANSLATION_IDS[lang] || 0);
   const transParam = transId ? `&translations=${transId}` : "";
   try {
     const data = await fetchJson<any>(
@@ -267,10 +293,26 @@ export async function fetchVerseByKey(
     );
     const v = data.verse;
     if (!v) return null;
-    const rawTrans =
-      v.translations?.[0]?.text ||
-      v.translations?.find((t: any) => t.resource_id === transId)?.text ||
-      "";
+    let rawTrans = "";
+    if (isAr) {
+      try {
+        const tData = await fetchJson<any>(
+          `${API_BASE}/tafsirs/16/by_chapter/${surah}?per_page=300`,
+          signal,
+        );
+        const item = (tData.tafsirs || []).find(
+          (t: any) => t.verse_key === `${surah}:${ayah}`,
+        );
+        rawTrans = item?.text || "";
+      } catch {
+        rawTrans = "";
+      }
+    } else if (transId) {
+      rawTrans =
+        v.translations?.[0]?.text ||
+        v.translations?.find((t: any) => t.resource_id === transId)?.text ||
+        "";
+    }
     return {
       surah,
       ayah,
