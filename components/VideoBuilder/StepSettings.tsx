@@ -40,6 +40,7 @@ import type { StorageVideo } from "@/lib/storage-client";
 import {
   ARABIC_FONTS,
   LATIN_FONTS,
+  AR_TRANSLATION_FONT,
   PLATFORM_META,
   DEFAULT_SETTINGS,
   VideoSettings,
@@ -144,6 +145,7 @@ const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
   "textOutline",
   "frameStyle",
   "verseSpacing",
+  "verseDisplay",
   "textAnimation",
   "transitionStyle",
 ];
@@ -808,6 +810,53 @@ export function StepSettings({
                 </p>
               </Field>
 
+              {/* Long-verse pager */}
+              <Field
+                label={L({
+                  en: "Long verses",
+                  fr: "Versets longs",
+                  ar: "الآيات الطويلة",
+                })}
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      {
+                        id: "auto" as const,
+                        label: L({
+                          en: "Auto-split",
+                          fr: "Découpage auto",
+                          ar: "تقسيم تلقائي",
+                        }),
+                      },
+                      {
+                        id: "full" as const,
+                        label: L({
+                          en: "Full verse",
+                          fr: "Vers entier",
+                          ar: "الآية كاملة",
+                        }),
+                      },
+                    ]
+                  ).map((opt) => (
+                    <ToggleBtn
+                      key={opt.id}
+                      active={(settings.verseDisplay ?? "auto") === opt.id}
+                      onClick={() => onChange("verseDisplay", opt.id)}
+                    >
+                      <span className="block text-[13px]">{opt.label}</span>
+                    </ToggleBtn>
+                  ))}
+                </div>
+                <p className="mt-1 text-[13px] text-parchment-muted/40">
+                  {L({
+                    en: "Long verses play in parts, synced to the recitation",
+                    fr: "Les versets longs se jouent en parties, synchronisés au récitant",
+                    ar: "الآيات الطويلة تُعرض على أجزاء متزامنة مع التلاوة",
+                  })}
+                </p>
+              </Field>
+
               {/* Toggles */}
               <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
                 {(
@@ -851,7 +900,27 @@ export function StepSettings({
                       <ToggleBtn
                         key={lang.id}
                         active={settings.translationLang === lang.id}
-                        onClick={() => onChange("translationLang", lang.id)}
+                        onClick={() => {
+                          onChange("translationLang", lang.id);
+                          /* Keep the translation font sensible across the
+                             script switch: Arabic text gets an
+                             Arabic-first stack, Latin text back to the
+                             default Latin stack. */
+                          const isArFont = ARABIC_FONTS.some(
+                            (f) => f.family === settings.translationFontFamily,
+                          );
+                          const isLatinFont = LATIN_FONTS.some(
+                            (f) => f.family === settings.translationFontFamily,
+                          );
+                          if (lang.id === "ar" && isLatinFont) {
+                            onChange("translationFontFamily", AR_TRANSLATION_FONT);
+                          } else if (lang.id !== "ar" && isArFont) {
+                            onChange(
+                              "translationFontFamily",
+                              DEFAULT_SETTINGS.translationFontFamily,
+                            );
+                          }
+                        }}
                       >
                         {lang.label}
                       </ToggleBtn>

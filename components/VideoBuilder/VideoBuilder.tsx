@@ -7,6 +7,7 @@ import {
   fetchSurahs,
   fetchReciters,
   fetchAyahs,
+  fetchVerseSegments,
   getAudioUrlCandidates,
 } from "@/lib/quran";
 /* ── Supabase Library (disabled — restore by uncommenting) ──────
@@ -16,6 +17,7 @@ import type { StorageVideo } from "@/lib/storage-client";
 import type { Surah, Ayah, Reciter } from "@/lib/quran";
 import {
   DEFAULT_SETTINGS,
+  AR_TRANSLATION_FONT,
   GenLog,
   VideoSettings,
   PLATFORM_META,
@@ -34,6 +36,8 @@ import {
   clearStaleJob,
 } from "@/lib/render-client";
 import { getEveryayahFolder } from "@/lib/quran";
+import { splitIntoPages } from "@/lib/verse-pages";
+import type { WordSegments } from "@/lib/verse-pages";
 import { GardenMark, Bloom } from "@/components/Ornament/ornaments";
 import { StudioBackdrop } from "./studio-backdrop";
 import { CheckIcon } from "./icons";
@@ -188,6 +192,9 @@ export function VideoBuilder() {
     verseSpacing: 0,
     transitionStyle: "none",
     translationLang: locale === "ar" ? "ar" : locale === "fr" ? "fr" : "en",
+    ...(locale === "ar"
+      ? { translationFontFamily: AR_TRANSLATION_FONT }
+      : null),
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -272,6 +279,28 @@ export function VideoBuilder() {
       });
     return () => ctrl.abort();
   }, [selectedSurah, settings.translationLang]);
+
+  /* Word-level verse timing (qdc) for the long-verse pager. Whole-surah
+     map, fetched once per surah+reciter — verse toggles never refetch.
+     Absent/failed → the pager falls back to proportional timing. */
+  const [verseTimings, setVerseTimings] = useState<Map<
+    number,
+    WordSegments
+  > | null>(null);
+  useEffect(() => {
+    const reciterNo = selectedReciter?.quranApiNo ?? 0;
+    if (!selectedSurah || reciterNo < 1 || reciterNo > 12) {
+      setVerseTimings(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    fetchVerseSegments(selectedSurah.number, reciterNo, ctrl.signal).then(
+      (m) => {
+        if (!ctrl.signal.aborted) setVerseTimings(m);
+      },
+    );
+    return () => ctrl.abort();
+  }, [selectedSurah, selectedReciter]);
 
   /* ── Supabase Library (disabled — restore by uncommenting) ──────
   useEffect(() => {
@@ -404,7 +433,7 @@ export function VideoBuilder() {
       return;
     }
     const urls: string[] = [];
-    if (selectedReciter.source === "quranapi" && selectedReciter.quranApiNo) {
+    if (selectedReciter.quranApiNo) {
       urls.push(
         ...getAudioUrlCandidates(
           selectedReciter.quranApiNo,
@@ -541,13 +570,31 @@ export function VideoBuilder() {
       }
 
       const spec = {
-        ayahs: selectedAyahsData.map((a, i) => ({
-          key: selectedSurah!.number + ":" + a.numberInSurah,
-          numberInSurah: a.numberInSurah,
-          text: a.text,
-          translation: a.translation ?? "",
-          durationSec: durations[i],
-        })),
+        ayahs: selectedAyahsData.map((a, i) => {
+          const plain = {
+            key: selectedSurah!.number + ":" + a.numberInSurah,
+            numberInSurah: a.numberInSurah,
+            text: a.text,
+            translation: a.translation ?? "",
+            durationSec: durations[i],
+          };
+          if ((settings.verseDisplay ?? "auto") !== "auto") return plain;
+          const pages = splitIntoPages({
+            arabic: a.text,
+            translation: a.translation ?? "",
+            durationSec: durations[i],
+            segments: verseTimings?.get(a.numberInSurah) ?? null,
+          });
+          if (pages.length < 2) return plain;
+          return {
+            ...plain,
+            pages: pages.map((p) => ({
+              text: p.aText,
+              translation: p.tText,
+              durationSec: p.endSec - p.startSec,
+            })),
+          };
+        }),
         surah: {
           number: String(selectedSurah!.number),
           name: selectedSurah!.name,
@@ -618,6 +665,7 @@ export function VideoBuilder() {
           reciter: selectedReciter,
           settings,
           platform: selectedPlatform,
+          verseTimings,
           onLog: pushLog,
           signal: ctrl.signal,
         });
@@ -653,6 +701,7 @@ export function VideoBuilder() {
     selectedAyahsData,
     settings,
     selectedPlatform,
+    verseTimings,
     stamp,
   ]);
 
@@ -904,6 +953,7 @@ export function VideoBuilder() {
               bgVideoRef={bgVideoRef}
               previewIdx={previewIdx}
               onPreviewIdx={setPreviewIdx}
+              verseTimings={verseTimings}
               isGenerating={isGenerating}
               genLogs={genLogs}
               resultVideoUrl={resultVideoUrl}
@@ -946,6 +996,7 @@ export function VideoBuilder() {
                     )}
                     onPreviewIdx={setPreviewIdx}
                     locale={locale}
+                    verseTimings={verseTimings}
                     height={400}
                     showControls={false}
                   />

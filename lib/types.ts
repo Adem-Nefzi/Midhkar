@@ -50,6 +50,8 @@ export interface VideoSettings {
   frameStyle: "none" | "corners" | "full" | "arch"; // decorative border on video
   // NEW: Verse transition style
   verseSpacing: number;       // extra seconds of silence between ayahs 0–3
+  // NEW: Long-verse pager (auto = split long verses into recitation-synced pages)
+  verseDisplay: "auto" | "full";
   // NEW: Text animation
   textAnimation: "none" | "fade"; // entrance animation for verse text
   // NEW: Background color (used when background = "color")
@@ -82,7 +84,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   textColor: "#d4af37",
   textOpacity: 100,
   textPosition: "center",
-  translationFontFamily: "'Inter', 'Lato', sans-serif",
+  translationFontFamily: "'Inter', 'Amiri', sans-serif",
   translationColor: "#f5f0e8",
   translationOpacity: 80,
   showSurahName: true,
@@ -106,6 +108,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   textOutline: false,
   frameStyle: "corners",
   verseSpacing: 0,
+  verseDisplay: "auto",
   textAnimation: "fade",
   bgColor: "#09090f",
   bgColorSecondary: "#1a0e00",
@@ -121,38 +124,51 @@ export const DEFAULT_SETTINGS: VideoSettings = {
 
 /* ── Arabic fonts ────────────────────────────────────────────── */
 
+/* Quranic-mark glyph audit (cmap, 2026-10): Cairo, Tajawal, Almarai,
+   Changa, El Messiri, Markazi, Reem Kufi and Aref Ruqaa lack the waqf
+   annotation signs (U+06D6…U+06E6) — Tajawal also lacks ٱ (U+0671).
+   Every stack therefore carries 'Amiri' as a per-glyph fallback: it
+   covers the full Uthmani set and is registered in BOTH the browser
+   (globals.css + fonts-ready.ts) and the server canvas (fonts.ts).
+   Browser canvas and napi-rs/skia both resolve missing glyphs down
+   this chain — without it those marks render as blank boxes. */
 export const ARABIC_FONTS = [
   { id: "amiri",         name: "Amiri",           nameAr: "أميري",         family: "'Amiri', serif" },
-  { id: "amiri-quran",   name: "Amiri Quran",     nameAr: "أميري قرآن",    family: "'Amiri Quran', serif" },
-  { id: "scheherazade",  name: "Scheherazade",     nameAr: "شهرزاد",        family: "'Scheherazade New', serif" },
-  { id: "noto-naskh",   name: "Noto Naskh",       nameAr: "نوتو نسخ",      family: "'Noto Naskh Arabic', serif" },
-  { id: "noto-kufi",    name: "Noto Kufi",        nameAr: "نوتو كوفي",     family: "'Noto Kufi Arabic', sans-serif" },
-  { id: "noto-sans-ar", name: "Noto Sans Arabic", nameAr: "نوتو سانس عربي",  family: "'Noto Sans Arabic', sans-serif" },
-  { id: "ibm-plex-ar",  name: "IBM Plex Arabic",  nameAr: "آي بي إم بليكس",   family: "'IBM Plex Sans Arabic', sans-serif" },
-  { id: "cairo",        name: "Cairo",            nameAr: "القاهرة",       family: "'Cairo', sans-serif" },
-  { id: "tajawal",      name: "Tajawal",          nameAr: "تجوال",         family: "'Tajawal', sans-serif" },
-  { id: "almarai",      name: "Almarai",          nameAr: "المرعي",        family: "'Almarai', sans-serif" },
-  { id: "changa",       name: "Changa",           nameAr: "تشانغا",        family: "'Changa', sans-serif" },
-  { id: "el-messiri",   name: "El Messiri",       nameAr: "المسيري",       family: "'El Messiri', sans-serif" },
-  { id: "markazi",      name: "Markazi Text",     nameAr: "مرکزي",         family: "'Markazi Text', serif" },
-  { id: "lateef",       name: "Lateef",           nameAr: "لطيف",          family: "'Lateef', serif" },
-  { id: "reem-kufi",    name: "Reem Kufi",        nameAr: "ريم كوفي",      family: "'Reem Kufi', sans-serif" },
-  { id: "aref-ruqaa",   name: "Aref Ruqaa",       nameAr: "عارف رقعة",     family: "'Aref Ruqaa', serif" },
+  { id: "amiri-quran",   name: "Amiri Quran",     nameAr: "أميري قرآن",    family: "'Amiri Quran', 'Amiri', serif" },
+  { id: "scheherazade",  name: "Scheherazade",     nameAr: "شهرزاد",        family: "'Scheherazade New', 'Amiri', serif" },
+  { id: "noto-naskh",   name: "Noto Naskh",       nameAr: "نوتو نسخ",      family: "'Noto Naskh Arabic', 'Amiri', serif" },
+  { id: "noto-kufi",    name: "Noto Kufi",        nameAr: "نوتو كوفي",     family: "'Noto Kufi Arabic', 'Amiri', sans-serif" },
+  { id: "noto-sans-ar", name: "Noto Sans Arabic", nameAr: "نوتو سانس عربي",  family: "'Noto Sans Arabic', 'Amiri', sans-serif" },
+  { id: "ibm-plex-ar",  name: "IBM Plex Arabic",  nameAr: "آي بي إم بليكس",   family: "'IBM Plex Sans Arabic', 'Amiri', sans-serif" },
+  { id: "cairo",        name: "Cairo",            nameAr: "القاهرة",       family: "'Cairo', 'Amiri', sans-serif" },
+  { id: "tajawal",      name: "Tajawal",          nameAr: "تجوال",         family: "'Tajawal', 'Amiri', sans-serif" },
+  { id: "almarai",      name: "Almarai",          nameAr: "المرعي",        family: "'Almarai', 'Amiri', sans-serif" },
+  { id: "changa",       name: "Changa",           nameAr: "تشانغا",        family: "'Changa', 'Amiri', sans-serif" },
+  { id: "el-messiri",   name: "El Messiri",       nameAr: "المسيري",       family: "'El Messiri', 'Amiri', sans-serif" },
+  { id: "markazi",      name: "Markazi Text",     nameAr: "مرکزي",         family: "'Markazi Text', 'Amiri', serif" },
+  { id: "lateef",       name: "Lateef",           nameAr: "لطيف",          family: "'Lateef', 'Amiri', serif" },
+  { id: "reem-kufi",    name: "Reem Kufi",        nameAr: "ريم كوفي",      family: "'Reem Kufi', 'Amiri', sans-serif" },
+  { id: "aref-ruqaa",   name: "Aref Ruqaa",       nameAr: "عارف رقعة",     family: "'Aref Ruqaa', 'Amiri', serif" },
 ] as const;
 
 /* ── Translation / Latin fonts ───────────────────────────────── */
 
 export const LATIN_FONTS = [
-  { id: "inter",        name: "Inter",            family: "'Inter', sans-serif" },
-  { id: "poppins",      name: "Poppins",          family: "'Poppins', sans-serif" },
-  { id: "jetbrains",    name: "JetBrains Mono",   family: "'JetBrains Mono', monospace" },
-  { id: "georgia",      name: "Georgia",          family: "'Georgia', 'Times New Roman', serif" },
-  { id: "lato",         name: "Lato",             family: "'Lato', sans-serif" },
-  { id: "playfair",     name: "Playfair Display", family: "'Playfair Display', serif" },
-  { id: "merriweather", name: "Merriweather",     family: "'Merriweather', serif" },
-  { id: "nunito",       name: "Nunito",           family: "'Nunito', sans-serif" },
+  { id: "inter",        name: "Inter",            family: "'Inter', 'Amiri', sans-serif" },
+  { id: "poppins",      name: "Poppins",          family: "'Poppins', 'Amiri', sans-serif" },
+  { id: "jetbrains",    name: "JetBrains Mono",   family: "'JetBrains Mono', 'Amiri', monospace" },
+  { id: "georgia",      name: "Georgia",          family: "'Georgia', 'Times New Roman', 'Amiri', serif" },
+  { id: "lato",         name: "Lato",             family: "'Lato', 'Amiri', sans-serif" },
+  { id: "playfair",     name: "Playfair Display", family: "'Playfair Display', 'Amiri', serif" },
+  { id: "merriweather", name: "Merriweather",     family: "'Merriweather', 'Amiri', serif" },
+  { id: "nunito",       name: "Nunito",           family: "'Nunito', 'Amiri', sans-serif" },
   { id: "amiri-latin",  name: "Amiri",            family: "'Amiri', serif" },
 ] as const;
+
+/** Default translation font when the translation language is Arabic
+ *  (tafsir). Latin-only picks would render every glyph as a box on the
+ *  server canvas — this stack always resolves Arabic. */
+export const AR_TRANSLATION_FONT = "'IBM Plex Sans Arabic', 'Amiri', sans-serif";
 
 /* ── Platform definitions (canonical source of truth) ───────── */
 

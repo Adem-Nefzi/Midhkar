@@ -54,6 +54,10 @@ export interface WorkerSegment {
    *  transition crossfade inside dead time instead of over speech. 0 if
    *  there's no gap after this verse. */
   trailFrames: number;
+  /** True when this segment is a later page of the SAME verse (long-verse
+   *  pager). Page boundaries crossfade EVEN when verse transitions are
+   *  disabled — otherwise a long verse would hard-cut mid-recitation. */
+  page?: boolean;
 }
 
 export type WorkerInMessage =
@@ -341,12 +345,16 @@ function computeBoundaries(
   segments: WorkerSegment[],
   transitionEnabled: boolean,
 ): Boundary[] {
-  if (!transitionEnabled) {
-    return segments.slice(0, -1).map(() => ({ preFrames: 0, postFrames: 0 }));
-  }
-  return segments.slice(0, -1).map((seg) => {
+  const TW = TRANSITION_WINDOW_FRAMES;
+  return segments.slice(0, -1).map((seg, i) => {
+    /* Page boundary inside one verse: always crossfade, split evenly
+       (there is no silence to hide in — the recitation is continuous). */
+    if (segments[i + 1].page) {
+      const preFrames = Math.floor(TW / 2);
+      return { preFrames, postFrames: TW - preFrames };
+    }
+    if (!transitionEnabled) return { preFrames: 0, postFrames: 0 };
     const trailAvail = Math.max(0, Math.min(seg.trailFrames, seg.totalFrames));
-    const TW = TRANSITION_WINDOW_FRAMES;
     if (trailAvail >= TW) return { preFrames: TW, postFrames: 0 };
     if (trailAvail > 0)
       return { preFrames: trailAvail, postFrames: TW - trailAvail };

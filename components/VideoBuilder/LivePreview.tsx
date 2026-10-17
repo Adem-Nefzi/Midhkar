@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { Ayah, Surah } from "@/lib/quran";
 import type { VideoSettings } from "@/lib/types";
 import { renderFullFrame } from "@/lib/canva-utils";
+import {
+  splitIntoPages,
+  needsSplit,
+  pageIndexAt,
+} from "@/lib/verse-pages";
+import type { VersePage, WordSegments } from "@/lib/verse-pages";
 import {
   getOutputResolution,
   getDeviceProfile,
@@ -26,6 +32,8 @@ interface Props {
   previewIdx: number;
   onPreviewIdx: (i: number) => void;
   locale: string;
+  /** qdc word timing for recitation-synced page windows (optional). */
+  verseTimings?: Map<number, WordSegments> | null;
   height?: number;
   showControls?: boolean;
   className?: string;
@@ -40,6 +48,7 @@ export function LivePreview({
   previewIdx,
   onPreviewIdx,
   locale,
+  verseTimings,
   height = 480,
   showControls = true,
   className = "",
@@ -59,6 +68,30 @@ export function LivePreview({
   ayahRef.current = ayahs[previewIdx] ?? ayahs[0] ?? null;
   settingsRef.current = settings;
   surahRef.current = surah;
+
+  /* Long-verse pager preview: split the current verse (durationSec = 1
+     keeps windows as pure 0..1 fractions — identical for the precise
+     and proportional timing modes) and cycle pages over a nominal
+     verse display time (~0.55s/word). */
+  const previewPages = useMemo((): {
+    pages: VersePage[];
+    nominalSec: number;
+  } | null => {
+    const ayah = ayahs[previewIdx];
+    if (!ayah || (settings.verseDisplay ?? "auto") !== "auto") return null;
+    if (!needsSplit(ayah.text)) return null;
+    const pages = splitIntoPages({
+      arabic: ayah.text,
+      translation: ayah.translation ?? "",
+      durationSec: 1,
+      segments: verseTimings?.get(ayah.numberInSurah) ?? null,
+    });
+    if (pages.length < 2) return null;
+    const words = ayah.text.trim().split(/\s+/).length;
+    return { pages, nominalSec: Math.min(60, Math.max(2.5, words * 0.55)) };
+  }, [ayahs, previewIdx, settings.verseDisplay, verseTimings]);
+  const previewPagesRef = useRef<typeof previewPages>(null);
+  previewPagesRef.current = previewPages;
 
   const [encW, encH] = getOutputResolution(
     platform.aspect,
@@ -122,6 +155,26 @@ export function LivePreview({
       const ayah = ayahRef.current;
       const sr = surahRef.current;
 
+      /* Long-verse pager: cycle pages over the nominal display time
+         (the real video syncs page windows to the recitation). */
+      const pv = previewPagesRef.current;
+      let drawAyah = ayah;
+      let pageIdx = 0;
+      if (pv && ayah) {
+        const frac = Math.min(
+          1,
+          (Date.now() - previewStartRef.current) / 1000 / pv.nominalSec,
+        );
+        pageIdx = pageIndexAt(pv.pages, frac);
+        const pg = pv.pages[pageIdx];
+        drawAyah = {
+          ...ayah,
+          text: pg.aText,
+          translation: pg.tText,
+          pageInfo: { index: pageIdx + 1, total: pv.pages.length },
+        };
+      }
+
       // Load (only) the fonts the current selection needs; re-trigger when
       // the user switches font family mid-preview.
       const key = `${s.fontFamily}|${s.translationFontFamily}`;
@@ -155,7 +208,7 @@ export function LivePreview({
       // don't repaint (and don't wake the compositor) unless an input
       // actually changed. Video backgrounds always repaint.
       if (!useVideoBg) {
-        const sig = `${key}|${ayah?.number ?? -1}|${sr.number}|${animP >= 1 ? 1 : animP.toFixed(2)}|${JSON.stringify(s)}`;
+        const sig = `${key}|${ayah?.number ?? -1}|p${pageIdx}|${sr.number}|${animP >= 1 ? 1 : animP.toFixed(2)}|${JSON.stringify(s)}`;
         if (sig === lastSig) {
           animRef.current = requestAnimationFrame(draw);
           return;
@@ -168,7 +221,7 @@ export function LivePreview({
       renderFullFrame(
         ctx,
         canvas,
-        ayah,
+        drawAyah,
         sr,
         s,
         useVideoBg ? videoEl : null,

@@ -137,6 +137,40 @@ export async function POST(request: Request) {
       return bad("Invalid ayah durations");
     }
     if (a.key.length > 12) return bad("Invalid ayah key");
+    /* Long-verse pager: pages are OPTIONAL and are dropped (not
+     * rejected) when malformed — the renderer then falls back to the
+     * full ayah text, so a bad client can never break a chunk. */
+    if ((a as { pages?: unknown }).pages !== undefined) {
+      const raw = (a as { pages?: unknown }).pages;
+      const pages = Array.isArray(raw) ? (raw as unknown[]) : null;
+      let ok = !!pages && pages.length >= 2 && pages.length <= 40;
+      if (ok) {
+        for (const p of pages!) {
+          const pg = p as { text?: unknown; translation?: unknown; durationSec?: unknown };
+          if (
+            typeof pg?.text !== "string" ||
+            !pg.text ||
+            typeof pg?.translation !== "string" ||
+            typeof pg?.durationSec !== "number" ||
+            !(pg.durationSec > 0 && pg.durationSec < 120)
+          ) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok) {
+        a.pages = (pages as { text: string; translation: string; durationSec: number }[]).map(
+          (p) => ({
+            text: p.text.slice(0, 4000),
+            translation: p.translation.slice(0, 4000),
+            durationSec: p.durationSec,
+          }),
+        );
+      } else {
+        delete a.pages;
+      }
+    }
   }
   const totalDur = spec.ayahs.reduce(
     (s, a) => s + a.durationSec + verseSpacing,
@@ -167,6 +201,9 @@ export async function POST(request: Request) {
   st.textGlowIntensity = num(st.textGlowIntensity, 100, 0, 100);
   st.textShadowIntensity = num(st.textShadowIntensity, 100, 0, 100);
   st.textOutlineWidth = num(st.textOutlineWidth, 3, 1, 5);
+  if (st.verseDisplay !== "full" && st.verseDisplay !== "auto") {
+    st.verseDisplay = "auto";
+  }
   if (
     !["bottom-right", "bottom-left", "top-right", "top-left"].includes(
       String(st.watermarkPosition),

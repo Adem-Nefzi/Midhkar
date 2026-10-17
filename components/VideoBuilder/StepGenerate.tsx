@@ -19,6 +19,7 @@ import { PLATFORM_META } from "@/lib/types";
 import type { PlatformId } from "@/lib/types";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { GenLog, VideoSettings } from "@/lib/types";
+import type { WordSegments } from "@/lib/verse-pages";
 import { getDeviceProfile, getOutputResolution } from "@/lib/device-profile";
 import { LivePreview } from "./LivePreview";
 import type { PlatformLike } from "./LivePreview";
@@ -36,6 +37,7 @@ interface Props {
   bgVideoRef: React.RefObject<HTMLVideoElement | null>;
   previewIdx: number;
   onPreviewIdx: (i: number) => void;
+  verseTimings?: Map<number, WordSegments> | null;
   isGenerating: boolean;
   genLogs: GenLog[];
   resultVideoUrl: string | null;
@@ -57,6 +59,7 @@ export function StepGenerate({
   bgVideoRef,
   previewIdx,
   onPreviewIdx,
+  verseTimings,
   isGenerating,
   genLogs,
   resultVideoUrl,
@@ -295,6 +298,7 @@ export function StepGenerate({
           previewIdx={previewIdx}
           onPreviewIdx={onPreviewIdx}
           locale={locale}
+          verseTimings={verseTimings}
           className="shrink-0"
         />
         </div>

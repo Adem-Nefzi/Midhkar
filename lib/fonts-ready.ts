@@ -44,22 +44,28 @@ const WEIGHTS: Record<string, string[]> = {
   Nunito: ["400", "600"],
 };
 
-function familyFromStack(stack: string | undefined): string | null {
-  if (!stack) return null;
-  const quoted = stack.match(/['"]([^'"]+)['"]/);
-  if (quoted) return quoted[1];
+function familiesFromStack(stack: string | undefined): string[] {
+  if (!stack) return [];
+  const quoted = [...stack.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  if (quoted.length) return quoted;
   const first = stack.split(",")[0].trim();
-  return first || null;
+  return first ? [first] : [];
 }
 
 const _cache = new Map<string, Promise<void>>();
 
 export function ensureFontsReady(settings?: FontSpec): Promise<void> {
+  /* Every family in a stack must be loaded — the canvas falls back
+     glyph-by-glyph down the chain (e.g. 'Cairo', 'Amiri'), so a
+     half-loaded chain would render fallback-font glyphs. */
   const families = [
-    familyFromStack(settings?.fontFamily) ?? "Amiri",
-    familyFromStack(settings?.translationFontFamily) ?? "Inter",
+    ...new Set([
+      ...familiesFromStack(settings?.fontFamily),
+      ...familiesFromStack(settings?.translationFontFamily),
+    ]),
   ];
-  const key = [...new Set(families)].sort().join("|");
+  const wanted = families.length ? families : ["Amiri", "Inter"];
+  const key = [...wanted].sort().join("|");
   const cached = _cache.get(key);
   if (cached) return cached;
 
@@ -72,7 +78,7 @@ export function ensureFontsReady(settings?: FontSpec): Promise<void> {
     await fontSet.ready;
 
     const jobs: Promise<unknown>[] = [];
-    for (const family of families) {
+    for (const family of wanted) {
       const weights = WEIGHTS[family];
       if (!weights) continue; // system font — instant, nothing to fetch
       for (const weight of weights) {

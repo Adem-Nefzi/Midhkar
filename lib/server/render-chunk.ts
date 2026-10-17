@@ -17,7 +17,7 @@ import {
   drawOverlayStyle,
   drawWatermark,
 } from "./server-canvas/canva-utils";
-import type { RenderPlanSpec, RenderChunk } from "@/lib/render-plan";
+import type { RenderPlanSpec, RenderChunk, PlanAyah } from "@/lib/render-plan";
 import type { VideoSettings } from "./server-canvas/types-settings";
 import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
 
@@ -305,10 +305,13 @@ function videoBitrate(cw: number, ch: number, isLowPower: boolean) {
 interface Segment {
   totalFrames: number;
   trailFrames: number;
+  /** Later page of the same verse (long-verse pager) — page boundaries
+   *  always crossfade, even with verse transitions disabled. */
+  page?: boolean;
 }
 
 function buildSegments(
-  durations: { totalSec: number; trailSec: number }[],
+  durations: { totalSec: number; trailSec: number; page?: boolean }[],
   fps: number,
 ): { segments: Segment[]; totalFrames: number } {
   const segments: Segment[] = [];
@@ -320,11 +323,57 @@ function buildSegments(
     const newCum = Math.round(cumSec * fps);
     const total = Math.max(1, newCum - cumFrames);
     const trail = Math.min(total, Math.round(d.trailSec * fps));
-    segments.push({ totalFrames: total, trailFrames: trail });
+    segments.push({ totalFrames: total, trailFrames: trail, page: d.page });
     cumFrames = newCum;
     totalFrames += total;
   }
   return { segments, totalFrames };
+}
+
+/** Page plan for one ayah: client-provided pages (when valid) scaled to
+ *  the SERVER-measured audio duration, or a single full-ayah item. */
+function planPagesFor(
+  ayah: PlanAyah,
+  measuredSec: number,
+): {
+  numberInSurah: number;
+  text: string;
+  translation: string;
+  durationSec: number;
+  pageInfo?: { index: number; total: number };
+}[] {
+  const single = [
+    {
+      numberInSurah: ayah.numberInSurah,
+      text: ayah.text,
+      translation: ayah.translation,
+      durationSec: measuredSec,
+    },
+  ];
+  const pages = ayah.pages;
+  if (!pages || pages.length < 2) return single;
+  let sum = 0;
+  for (const p of pages) {
+    if (
+      typeof p?.text !== "string" ||
+      typeof p?.translation !== "string" ||
+      !Number.isFinite(p?.durationSec) ||
+      p.durationSec <= 0
+    ) {
+      return single;
+    }
+    sum += p.durationSec;
+  }
+  if (!(sum > 0)) return single;
+  const scale = measuredSec / sum;
+  const total = pages.length;
+  return pages.map((p, i) => ({
+    numberInSurah: ayah.numberInSurah,
+    text: p.text,
+    translation: p.translation,
+    durationSec: p.durationSec * scale,
+    pageInfo: { index: i + 1, total },
+  }));
 }
 
 /* Crossfade boundary AFTER a segment — mirrors encode.worker.ts
@@ -341,9 +390,13 @@ function buildSegments(
 function boundaryFor(
   trailFrames: number,
   transitionStyle: string,
+  isPage = false,
 ): { pre: number; post: number } {
-  if (transitionStyle === "none") return { pre: 0, post: 0 };
   const TW = TRANSITION_WINDOW_FRAMES;
+  /* Page boundary inside one verse: always crossfade, split evenly
+     (matches encode.worker.ts computeBoundaries — no silence to hide in). */
+  if (isPage) return { pre: Math.floor(TW / 2), post: TW - Math.floor(TW / 2) };
+  if (transitionStyle === "none") return { pre: 0, post: 0 };
   const trail = Math.max(0, trailFrames);
   if (trail >= TW) return { pre: TW, post: 0 };
   if (trail > 0) return { pre: trail, post: TW - trail };
@@ -478,8 +531,29 @@ let samples: Float32Array;
   /* Apply bookend fades to the full audio track (match video bookend fades) */
   applyBookendFades(track);
 
-  /* 2. Segments */
-  const { segments, totalFrames } = buildSegments(durations, RENDER_FPS);
+  /* 2. Page plans + segments.
+   * Each ayah's client-planned pages (long-verse pager) are scaled to the
+   * SERVER-measured audio so per-page windows stay byte-identical to the
+   * audio track; splash pages keep the verse's trailing silence. */
+  const pagePlans = ayahs.map((a, i) => planPagesFor(a, durations[i].totalSec));
+  const segDurations: { totalSec: number; trailSec: number; page?: boolean }[] =
+    [];
+  for (let i = 0; i < pagePlans.length; i++) {
+    const pl = pagePlans[i];
+    let acc = 0;
+    for (let pg = 0; pg < pl.length; pg++) {
+      const isLast = pg === pl.length - 1;
+      let sec = pl[pg].durationSec;
+      if (isLast) sec = Math.max(0.05, durations[i].totalSec - acc);
+      acc += sec;
+      segDurations.push({
+        totalSec: sec,
+        trailSec: isLast ? verseSpacing : 0,
+        page: pg > 0 || undefined,
+      });
+    }
+  }
+  const { segments, totalFrames } = buildSegments(segDurations, RENDER_FPS);
 
   /* 3. Bg playlist frames.
    * Memory-bounded: JPEG-encoded frames only (decoded on demand in
@@ -570,7 +644,12 @@ let samples: Float32Array;
   const transitionEnabled = transitionStyle !== "none";
 
   const renderOverlay = async (
-    ayah: (typeof ayahs)[number],
+    item: {
+      numberInSurah: number;
+      text: string;
+      translation: string;
+      pageInfo?: { index: number; total: number };
+    },
   ): Promise<Awaited<ReturnType<typeof loadImage>>> => {
     const canvas = createCanvas(cw, ch);
     const ctx = canvas.getContext("2d");
@@ -601,12 +680,13 @@ let samples: Float32Array;
       canvas as unknown as HTMLCanvasElement,
       {
         number: 0,
-        numberInSurah: ayah.numberInSurah,
-        text: ayah.text,
-        translation: ayah.translation,
+        numberInSurah: item.numberInSurah,
+        text: item.text,
+        translation: item.translation,
         juz: 0,
         page: 0,
         sajda: false,
+        pageInfo: item.pageInfo,
       },
       surah,
       s,
@@ -616,26 +696,36 @@ let samples: Float32Array;
   };
 
   const overlayImages: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
-  for (let i = 0; i < ayahs.length; i++) {
-    if (signal.aborted) throw new Error("Aborted");
-    overlayImages.push(await renderOverlay(ayahs[i]));
-    onProgress(
-      `Rendering overlay ${i + 1}/${ayahs.length}`,
-      36 + Math.round(((i + 1) / ayahs.length) * 8),
-    );
+  const overlayTotal = pagePlans.reduce((a, pl) => a + pl.length, 0);
+  let overlayDone = 0;
+  for (const pl of pagePlans) {
+    for (const pg of pl) {
+      if (signal.aborted) throw new Error("Aborted");
+      overlayImages.push(await renderOverlay(pg));
+      overlayDone++;
+      onProgress(
+        `Rendering overlay ${overlayDone}/${overlayTotal}`,
+        36 + Math.round((overlayDone / overlayTotal) * 8),
+      );
+    }
   }
 
   /* Chunk-seam neighbours: the verse crossfade AT a chunk boundary
      needs the verse just OUTSIDE this chunk so the fade continues
      across concat (previous chunk renders the outgoing half with the
-     same boundary math — t stays continuous). */
+     same boundary math — t stays continuous). For paged verses the
+     neighbour is the LAST page (before) / FIRST page (after). */
   let prevOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
   let nextOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
   if (transitionEnabled && chunk.from > 0) {
-    prevOverlay = await renderOverlay(spec.ayahs[chunk.from - 1]);
+    const prevAyah = spec.ayahs[chunk.from - 1];
+    const pl = planPagesFor(prevAyah, prevAyah.durationSec);
+    prevOverlay = await renderOverlay(pl[pl.length - 1]);
   }
   if (transitionEnabled && chunk.to + 1 < spec.ayahs.length) {
-    nextOverlay = await renderOverlay(spec.ayahs[chunk.to + 1]);
+    const nextAyah = spec.ayahs[chunk.to + 1];
+    const pl = planPagesFor(nextAyah, nextAyah.durationSec);
+    nextOverlay = await renderOverlay(pl[0]);
   }
 
   /* 5. Composite + encode via FFmpeg pipe */
@@ -756,11 +846,15 @@ let samples: Float32Array;
 
   /* Crossfade boundary AFTER each segment. The last segment of the
      chunk still gets one when a next verse exists globally (the
-     chunk seam) — the neighbour overlay renders the other half. */
+     chunk seam) — the neighbour overlay renders the other half.
+     Page boundaries (later page of the same verse) ALWAYS crossfade. */
   const boundaries: ({ pre: number; post: number } | null)[] = segments.map(
     (seg, i) => {
-      if (!transitionEnabled) return null;
       const isLastSeg = i === segments.length - 1;
+      if (!isLastSeg && segments[i + 1].page) {
+        return boundaryFor(0, transitionStyle, true);
+      }
+      if (!transitionEnabled) return null;
       if (!isLastSeg || chunk.to + 1 < spec.ayahs.length) {
         return boundaryFor(seg.trailFrames, transitionStyle);
       }
@@ -773,13 +867,16 @@ let samples: Float32Array;
     const seg = segments[segIdx];
     /* Incoming crossfade from the previous verse: previous segment
        inside this chunk, or the chunk-seam neighbour for segment 0.
-       Boundary math is identical on both sides of the seam (uniform
-       trail), so t stays continuous across concat. */
+       Segment 0 is always the FIRST page of its ayah (chunks split at
+       ayah boundaries), so its incoming boundary is a verse boundary —
+       use the equivalent trail (round(verseSpacing*fps)) rather than
+       seg.trailFrames (which is 0 on a first page and would make the
+       two sides of the seam compute different windows). */
     const inB =
       segIdx > 0
         ? boundaries[segIdx - 1]
         : transitionEnabled && prevOverlay
-          ? boundaryFor(seg.trailFrames, transitionStyle)
+          ? boundaryFor(Math.round(verseSpacing * RENDER_FPS), transitionStyle)
           : null;
     const outB = boundaries[segIdx];
     const outgoingPre = outB ? Math.min(outB.pre, seg.totalFrames) : 0;

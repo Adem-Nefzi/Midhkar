@@ -24,7 +24,10 @@ function cacheKey(
   maxW: number,
   safeH: number,
 ): string {
-  return `${ayah?.numberInSurah ?? "none"}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.translationLang}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}|${Math.round(safeH)}`;
+  /* The verse text is part of the key: pages of the same verse share a
+     numberInSurah but carry different (shorter) text — without this the
+     first page's measured block would be served for every page. */
+  return `${ayah?.numberInSurah ?? "none"}|${ayah?.text ?? ""}|${surah.number}|${s.fontSize}|${s.fontFamily}|${s.translationFontFamily}|${s.translationLang}|${s.showSurahName}|${s.showVerseNumber}|${s.showTranslation}|${maxW}|${Math.round(safeH)}`;
 }
 
 /* ── Font size map ───────────────────────────────────────────── */
@@ -275,6 +278,10 @@ function measureTextBlock(
       if (s.showVerseNumber)
         parts.push(`(${surah.number}:${ayah.numberInSurah})`);
       badgeText = parts.join("  ");
+      /* Long-verse pager ornament: part position on split verses. */
+      if (ayah.pageInfo && ayah.pageInfo.total > 1) {
+        badgeText += `  ·  ${ayah.pageInfo.index}/${ayah.pageInfo.total}`;
+      }
     }
 
     let transLines: string[] = [];
@@ -545,7 +552,7 @@ export function drawWatermark(
   position: string = "bottom-right",
 ): void {
   ctx.save();
-  ctx.font = `${Math.round(ch * 0.022)}px sans-serif`;
+  ctx.font = `${Math.round(ch * 0.022)}px 'Noto Naskh Arabic', 'Amiri', sans-serif`;
   ctx.fillStyle = "rgba(245,240,232,0.55)";
   const pad = Math.round(ch * 0.025);
   const xRight = cw - pad;

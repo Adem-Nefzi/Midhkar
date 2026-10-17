@@ -19,4 +19,5 @@ export interface Ayah {
   juz: number;
   page: number;
   sajda: boolean;
+  pageInfo?: { index: number; total: number };
 }

@@ -34,6 +34,7 @@ export interface VideoSettings {
   textOutline: boolean;
   frameStyle: "none" | "corners" | "full" | "arch";
   verseSpacing: number;
+  verseDisplay?: "auto" | "full";
   textAnimation: "none" | "fade";
   bgColor: string;
   bgColorSecondary: string;

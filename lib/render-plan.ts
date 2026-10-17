@@ -4,12 +4,23 @@
  * render-client.ts (client) — keep it dependency-free.
  */
 
+export interface PlanPage {
+  text: string;
+  translation: string;
+  durationSec: number;
+}
+
 export interface PlanAyah {
   key: string;
   numberInSurah: number;
   text: string;
   translation: string;
   durationSec: number;
+  /** Long-verse pager: pages replace `text`/`translation` when present.
+   *  durationSec stays the FULL ayah duration; page durations should
+   *  sum to it (the chunk renderer falls back to the full ayah when
+   *  they don't). */
+  pages?: PlanPage[];
 }
 
 export interface RenderPlanSpec {

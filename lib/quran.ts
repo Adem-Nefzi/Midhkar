@@ -6,6 +6,9 @@
  * Per-ayah audio from the Quran Foundation CDN (everyayah.com / quranicaudio.com).
  */
 
+import type { WordSegments } from "./verse-pages";
+import { normalizeWordSegments } from "./verse-pages";
+
 const API_BASE = "https://api.quran.com/api/v4";
 
 export interface Surah {
@@ -26,6 +29,8 @@ export interface Ayah {
   juz: number;
   page: number;
   sajda: boolean;
+  /** Set on synthetic per-page ayah objects (verse pager ornament). */
+  pageInfo?: { index: number; total: number };
 }
 
 export interface Reciter {
@@ -34,7 +39,7 @@ export interface Reciter {
   englishName: string;
   quranApiNo?: number;
   primary?: boolean;
-  source: "alquran" | "quranapi";
+  source: "alquran" | "quranapi" | "everyayah";
 }
 
 export const TEXT_POSITIONS = [
@@ -56,11 +61,23 @@ export const VERSE_PRESETS = [
    (the source of truth). CDN coverage probed per reciter (2026-08):
    only ids 1–5 still have live the-quran-project Data/<id>/ folders —
    `primary: true`; the rest are everyayah-only (`primary` omitted) and
-   getAudioUrlCandidates() skips the dead CDN for them. */
+   getAudioUrlCandidates() skips the dead CDN for them.
+
+   IDs ≥ 101 are everyayah-only MANUAL entries (not in the QF recitations
+   API): synthetic ids keep the keyed lookup for getAudioUrlCandidates /
+   getEveryayahFolder working, and never collide with real QF ids (1-12).
+   They have NO qdc word-timing segments — the verse pager falls back to
+   proportional (character-count) timing for them. */
 const QURAN_FOUNDATION_RECITERS: Record<
   number,
   { englishName: string; name: string; everyayahFolder: string; primary?: boolean }
 > = {
+  1: {
+    englishName: "AbdulBaset AbdulSamad (Mujawwad)",
+    name: "عبد الباسط عبد الصمد (مجوّد)",
+    everyayahFolder: "Abdul_Basit_Mujawwad_128kbps",
+    primary: true,
+  },
   7: {
     englishName: "Mishari Rashid al-Afasy",
     name: "مشاري العفاسي",
@@ -95,6 +112,11 @@ const QURAN_FOUNDATION_RECITERS: Record<
     name: "محمود خليل الحصري",
     everyayahFolder: "Husary_128kbps",
   },
+  8: {
+    englishName: "Mohamed Siddiq al-Minshawi (Mujawwad)",
+    name: "محمد صديق المنشاوي (مجوّد)",
+    everyayahFolder: "Minshawy_Mujawwad_192kbps",
+  },
   9: {
     englishName: "Mohamed Siddiq al-Minshawi",
     name: "محمد صديق المنشاوي",
@@ -104,6 +126,42 @@ const QURAN_FOUNDATION_RECITERS: Record<
     englishName: "Saud ash-Shuraym",
     name: "سعود الشريم",
     everyayahFolder: "Saood_ash-Shuraym_128kbps",
+  },
+  11: {
+    englishName: "Mohamed al-Tablawi",
+    name: "محمد الطبلاوي",
+    everyayahFolder: "Mohammad_al_Tablaway_128kbps",
+  },
+  12: {
+    englishName: "Mahmoud Khalil Al-Husary (Muallim)",
+    name: "محمود خليل الحصري (المعلّم)",
+    everyayahFolder: "Husary_Muallim_128kbps",
+  },
+  /* ── Manual everyayah-only additions (ids ≥ 101) — folders probed 2026-10 ── */
+  101: {
+    englishName: "Maher al-Muaiqly",
+    name: "ماهر المعيقلي",
+    everyayahFolder: "MaherAlMuaiqly128kbps",
+  },
+  102: {
+    englishName: "Muhammad Ayyub",
+    name: "محمد أيوب",
+    everyayahFolder: "Muhammad_Ayyoub_128kbps",
+  },
+  103: {
+    englishName: "Yasser ad-Dussary",
+    name: "ياسر الدوسري",
+    everyayahFolder: "Yasser_Ad-Dussary_128kbps",
+  },
+  104: {
+    englishName: "Nasser al-Qatami",
+    name: "ناصر القطامي",
+    everyayahFolder: "Nasser_Alqatami_128kbps",
+  },
+  105: {
+    englishName: "Ali al-Hudhaify",
+    name: "علي الحذيفي",
+    everyayahFolder: "Hudhaify_128kbps",
   },
 };
 
@@ -196,6 +254,7 @@ export async function fetchReciters(): Promise<Reciter[]> {
     // Fallback: use hardcoded reciters if API fails
     if (results.length === 0) {
       for (const [no, info] of Object.entries(QURAN_FOUNDATION_RECITERS)) {
+        if (Number(no) >= 101) continue;
         results.push({
           identifier: `quranapi-${no}`,
           englishName: info.englishName,
@@ -206,6 +265,20 @@ export async function fetchReciters(): Promise<Reciter[]> {
         });
       }
     }
+
+  /* Manual everyayah-only reciters (ids ≥ 101) — always offered,
+     regardless of the QF API listing. */
+  for (const [no, info] of Object.entries(QURAN_FOUNDATION_RECITERS)) {
+    if (Number(no) < 101) continue;
+    results.push({
+      identifier: `everyayah-${no}`,
+      englishName: info.englishName,
+      name: info.name,
+      quranApiNo: Number(no),
+      primary: false,
+      source: "everyayah",
+    });
+  }
 
   return results;
 }
@@ -267,6 +340,57 @@ export async function fetchAyahs(
       sajda: !!v.sajdah_number,
     };
   });
+}
+
+/* ── Word-level verse timing (qdc) ─────────────────────────────────
+   api.qurancdn.com is Quran.com's own audio CDN/API (same org as the
+   data API) — it carries per-verse word segments for recitations 1-12.
+   Used ONLY by the long-verse pager; every failure path degrades to
+   proportional (character-count) timing, so nothing user-visible
+   depends on this endpoint staying up. Cached per surah+reciter by the
+   shared fetchJson sessionStorage cache. */
+
+const QDC_BASE = "https://api.qurancdn.com/api/qdc";
+
+export async function fetchVerseSegments(
+  surahNumber: number,
+  reciterNo: number,
+  signal?: AbortSignal,
+): Promise<Map<number, WordSegments> | null> {
+  if (!reciterNo || reciterNo > 12) return null;
+  try {
+    const data = await fetchJson<any>(
+      `${QDC_BASE}/audio/reciters/${reciterNo}/audio_files?chapter=${surahNumber}&segments=true`,
+      signal,
+    );
+    const timings = data?.audio_files?.[0]?.verse_timings || [];
+    const map = new Map<number, WordSegments>();
+    for (const vt of timings) {
+      const ayahNo = Number(String(vt?.verse_key || "").split(":")[1]);
+      if (
+        !ayahNo ||
+        !Array.isArray(vt.segments) ||
+        vt.segments.length === 0 ||
+        typeof vt.timestamp_from !== "number" ||
+        typeof vt.timestamp_to !== "number"
+      ) {
+        continue;
+      }
+      /* qdc segment timestamps are chapter-absolute and occasionally
+         malformed — normalize to verse-relative & drop bad entries. */
+      const verseMs = vt.timestamp_to - vt.timestamp_from;
+      const segments = normalizeWordSegments(
+        vt.segments,
+        vt.timestamp_from,
+        verseMs,
+      );
+      if (segments.length === 0) continue;
+      map.set(ayahNo, { verseMs, segments });
+    }
+    return map.size ? map : null;
+  } catch {
+    return null;
+  }
 }
 
 /* ── Single verse by key (used by the living hero preview) ────── */

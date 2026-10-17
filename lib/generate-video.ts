@@ -33,6 +33,8 @@ import {
 } from "@/lib/quran";
 import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, Platform } from "@/lib/types";
+import { splitIntoPages } from "@/lib/verse-pages";
+import type { VersePage, WordSegments } from "@/lib/verse-pages";
 import { drawAyahFrame, drawBackground, drawOverlayStyle, drawWatermark } from "@/lib/canva-utils";
 import { ensureFontsReady } from "./fonts-ready";
 import { getCachedVideoDuration } from "./video-meta";
@@ -126,7 +128,7 @@ export async function prefetchAudio(
   reciter: Reciter,
   surah: Surah,
 ): Promise<void> {
-  if (reciter.source !== "quranapi" || !reciter.quranApiNo) return;
+  if (!reciter.quranApiNo) return;
 
   acquireAudioContext();
   try {
@@ -349,7 +351,7 @@ async function getBackgroundBytesList(
 ══════════════════════════════════════════════════════════════ */
 
 async function renderAyahOverlays(
-  prepared: { ayah: Ayah }[],
+  items: { ayah: Ayah }[],
   surah: Surah,
   settings: VideoSettings,
   cw: number,
@@ -386,7 +388,7 @@ async function renderAyahOverlays(
     batch = [];
   };
 
-  for (let i = 0; i < prepared.length; i++) {
+  for (let i = 0; i < items.length; i++) {
     ctx.clearRect(0, 0, cw, ch);
 
     if (isStaticBg) {
@@ -400,7 +402,7 @@ async function renderAyahOverlays(
     // the decoded video frame + darkness overlay beneath it.
 
     drawOverlayStyle(ctx, cw, ch, settings.overlayStyle, settings.bgOverlay);
-    drawAyahFrame(ctx, canvas, prepared[i].ayah, surah, settings);
+    drawAyahFrame(ctx, canvas, items[i].ayah, surah, settings);
       if (settings.showWatermark && settings.watermarkText?.trim()) {
         drawWatermark(ctx, cw, ch, settings.watermarkText, settings.watermarkPosition);
       }
@@ -409,11 +411,11 @@ async function renderAyahOverlays(
       await createImageBitmap(canvas, { premultiplyAlpha: "none" }),
     );
     if (batch.length >= OVERLAY_BATCH) flush();
-    onProgress(i + 1, prepared.length);
+    onProgress(i + 1, items.length);
   }
   flush();
 
-  return prepared.length;
+  return items.length;
 }
 
 /* ── Audio URL helpers (unchanged) ───────────────────────────── */
@@ -423,7 +425,7 @@ function getAudioUrls(
   surahNum: number,
   ayahNum: number,
 ): string[] {
-  if (reciter.source !== "quranapi" || !reciter.quranApiNo) return [];
+  if (!reciter.quranApiNo) return [];
   return getAudioUrlCandidates(reciter.quranApiNo, surahNum, ayahNum);
 }
 
@@ -465,20 +467,48 @@ interface PreparedAyah {
    drift never exceeds half a frame no matter how many verses there are.
 ══════════════════════════════════════════════════════════════ */
 
-function buildSegments(prepared: PreparedAyah[]): WorkerSegment[] {
+function buildSegments(
+  prepared: { totalSec: number; trailSec: number }[],
+  pagesByAyah?: VersePage[][],
+): WorkerSegment[] {
   let cumSec = 0;
   let cumFrames = 0;
-  return prepared.map((p) => {
-    cumSec += p.totalSec + p.trailSec;
-    const newCumFrames = Math.round(cumSec * FPS);
-    const totalFrames = Math.max(1, newCumFrames - cumFrames);
-    cumFrames = newCumFrames;
-    // trailFrames only needs to be approximately right (it just tells the
-    // worker how much silence is available to hide a transition in), so a
-    // simple non-cumulative rounding here is fine.
-    const trailFrames = Math.min(totalFrames, Math.round(p.trailSec * FPS));
-    return { totalFrames, trailFrames };
-  });
+  const out: WorkerSegment[] = [];
+  for (let a = 0; a < prepared.length; a++) {
+    const p = prepared[a];
+    const pages = pagesByAyah?.[a];
+    if (pages && pages.length > 1) {
+      /* Long-verse pager: one segment per page. trailSec rides on the
+         LAST page only (it belongs to the end of the ayah). */
+      let pageSum = 0;
+      for (let i = 0; i < pages.length; i++) {
+        const isLast = i === pages.length - 1;
+        let sec = pages[i].endSec - pages[i].startSec;
+        if (isLast) sec = Math.max(0.05, p.totalSec - pageSum);
+        pageSum += sec;
+        const trailSec = isLast ? p.trailSec : 0;
+        cumSec += sec + trailSec;
+        const newCumFrames = Math.round(cumSec * FPS);
+        const totalFrames = Math.max(1, newCumFrames - cumFrames);
+        cumFrames = newCumFrames;
+        out.push({
+          totalFrames,
+          trailFrames: Math.min(totalFrames, Math.round(trailSec * FPS)),
+          page: i > 0 || undefined,
+        });
+      }
+    } else {
+      cumSec += p.totalSec + p.trailSec;
+      const newCumFrames = Math.round(cumSec * FPS);
+      const totalFrames = Math.max(1, newCumFrames - cumFrames);
+      cumFrames = newCumFrames;
+      out.push({
+        totalFrames,
+        trailFrames: Math.min(totalFrames, Math.round(p.trailSec * FPS)),
+      });
+    }
+  }
+  return out;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -491,10 +521,12 @@ export async function generateVideo(params: {
   reciter: Reciter;
   settings: VideoSettings;
   platform: Platform;
+  /** Optional qdc word segments per ayah (long-verse pager precision). */
+  verseTimings?: Map<number, WordSegments> | null;
   onLog: (log: { msg: string; pct: number }) => void;
   signal: AbortSignal;
 }): Promise<Blob> {
-  const { ayahs, surah, reciter, settings, platform, onLog, signal } = params;
+  const { ayahs, surah, reciter, settings, platform, verseTimings, onLog, signal } = params;
   // Overlay rendering and the worker report progress concurrently; keep the
   // bar monotone so interleaved messages never make it jump backwards.
   let lastPct = 0;
@@ -603,11 +635,51 @@ export async function generateVideo(params: {
       );
     }
 
-    /* ── 4. Start the worker. Audio encoding + background decode begin
-       immediately, overlapping with overlay rendering below. ───────── */
+    /* ── 4. Plan long-verse pages (synced to the decoded per-ayah
+       durations), then start the worker. Audio encoding + background
+       decode begin immediately, overlapping with overlay rendering. ── */
     log("Starting encoder (background thread)…", 33);
 
-    const segments: WorkerSegment[] = buildSegments(prepared);
+    const pagesByAyah: VersePage[][] = prepared.map((p) => {
+      if ((settings.verseDisplay ?? "auto") !== "auto") {
+        return [
+          {
+            aText: p.ayah.text,
+            tText: p.ayah.translation ?? "",
+            startSec: 0,
+            endSec: p.totalSec,
+          },
+        ];
+      }
+      return splitIntoPages({
+        arabic: p.ayah.text,
+        translation: p.ayah.translation ?? "",
+        durationSec: p.totalSec,
+        segments: verseTimings?.get(p.ayah.numberInSurah) ?? null,
+      });
+    });
+
+    /* One overlay per page; synthetic ayah carries the page's text plus
+       the (index/total) ornament for the badge. */
+    const overlayPlan: { ayah: Ayah }[] = [];
+    for (let a = 0; a < prepared.length; a++) {
+      const p = prepared[a];
+      const pages = pagesByAyah[a];
+      for (let i = 0; i < pages.length; i++) {
+        overlayPlan.push({
+          ayah: {
+            ...p.ayah,
+            text: pages[i].aText,
+            translation: pages[i].tText,
+            ...(pages.length > 1
+              ? { pageInfo: { index: i + 1, total: pages.length } }
+              : {}),
+          },
+        });
+      }
+    }
+
+    const segments: WorkerSegment[] = buildSegments(prepared, pagesByAyah);
     const totalRenderFrames =
       segments.reduce((s, seg) => s + seg.totalFrames, 0) || 1;
 
@@ -631,7 +703,7 @@ export async function generateVideo(params: {
       channels: CHANNELS,
       frameDurationS: 1 / FPS,
       segments,
-      overlayCount: prepared.length,
+      overlayCount: overlayPlan.length,
       bgVideoBytes: bgVideoBytesList,
       maxBgFrames,
       maxTotalBgFrames,
@@ -650,7 +722,7 @@ export async function generateVideo(params: {
     try {
       await ensureFontsReady(settings); // Critical for mobile + new web fonts
       await renderAyahOverlays(
-        prepared,
+        overlayPlan,
         surah,
         settings,
         cw,
