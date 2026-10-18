@@ -163,6 +163,31 @@ const QURAN_FOUNDATION_RECITERS: Record<
     name: "علي الحذيفي",
     everyayahFolder: "Hudhaify_128kbps",
   },
+  106: {
+    englishName: "Mahmoud Khalil Al-Husary (Mujawwad)",
+    name: "محمود خليل الحصري (مجوّد)",
+    everyayahFolder: "Husary_Mujawwad_64kbps",
+  },
+  107: {
+    englishName: "Saad al-Ghamidi",
+    name: "سعد الغامدي",
+    everyayahFolder: "Ghamadi_40kbps",
+  },
+  108: {
+    englishName: "Abdul Muhsin al-Qasim",
+    name: "عبد المحسن القاسم",
+    everyayahFolder: "Muhsin_Al_Qasim_192kbps",
+  },
+  109: {
+    englishName: "Fares Abbad",
+    name: "فارس عباد",
+    everyayahFolder: "Fares_Abbad_64kbps",
+  },
+  110: {
+    englishName: "Salah al-Budair",
+    name: "صلاح البدير",
+    everyayahFolder: "Salah_Al_Budair_128kbps",
+  },
 };
 
 /* ── Translation resource IDs (Quran Foundation API) ─────────────────── */

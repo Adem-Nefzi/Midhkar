@@ -489,3 +489,27 @@ export function drawWatermark(
   ctx.restore();
 }
 
+export function drawVignette(
+  ctx: CanvasRenderingContext2D,
+  cw: number,
+  ch: number,
+  pct: number,
+): void {
+  if (!(pct > 0)) return;
+  const a = Math.min(0.85, (pct / 100) * 0.85);
+  const g = ctx.createRadialGradient(
+    cw / 2,
+    ch / 2,
+    Math.min(cw, ch) * 0.3,
+    cw / 2,
+    ch / 2,
+    Math.max(cw, ch) * 0.75,
+  );
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(1, `rgba(0,0,0,${a})`);
+  ctx.save();
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.restore();
+}
+

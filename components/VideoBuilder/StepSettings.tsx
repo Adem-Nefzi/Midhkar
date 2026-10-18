@@ -148,6 +148,7 @@ const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
   "verseDisplay",
   "textAnimation",
   "transitionStyle",
+  "vignette",
 ];
 
 /* ────────────────────────────────────────────────────────────── */
@@ -764,6 +765,20 @@ export function StepSettings({
                   onChange={(e) =>
                     onChange("bgOverlay", parseInt(e.target.value))
                   }
+                  className="slider"
+                />
+              </Field>
+
+              {/* Vignette */}
+              <Field
+                label={`${L({ en: "Vignette", fr: "Vignette", ar: "تعتيم الحواف" })}: ${settings.vignette}%`}
+              >
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.vignette}
+                  onChange={(e) => onChange("vignette", parseInt(e.target.value))}
                   className="slider"
                 />
               </Field>

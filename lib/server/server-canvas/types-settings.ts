@@ -30,6 +30,7 @@ export interface VideoSettings {
   watermarkText: string;
   watermarkPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   exportQuality: "standard" | "balanced" | "high";
+  vignette: number;
   textGlow: boolean;
   textOutline: boolean;
   frameStyle: "none" | "corners" | "full" | "arch";

@@ -43,6 +43,8 @@ export interface VideoSettings {
   watermarkPosition: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   // Export quality
   exportQuality: "standard" | "balanced" | "high";
+  // NEW: Vignette (darkened frame edges), 0–100 %
+  vignette: number;
   // NEW: Text effects
   textGlow: boolean;          // golden glow behind Arabic text
   textOutline: boolean;       // thin outline around Arabic letters
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   watermarkText: "",
   watermarkPosition: "bottom-right",
   exportQuality: "balanced",
+  vignette: 0,
   textGlow: false,
   textOutline: false,
   frameStyle: "corners",

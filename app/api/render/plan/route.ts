@@ -201,6 +201,7 @@ export async function POST(request: Request) {
   st.textGlowIntensity = num(st.textGlowIntensity, 100, 0, 100);
   st.textShadowIntensity = num(st.textShadowIntensity, 100, 0, 100);
   st.textOutlineWidth = num(st.textOutlineWidth, 3, 1, 5);
+  st.vignette = num(st.vignette, 0, 0, 100);
   if (st.verseDisplay !== "full" && st.verseDisplay !== "auto") {
     st.verseDisplay = "auto";
   }

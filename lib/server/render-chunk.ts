@@ -15,6 +15,7 @@ import { ensureFonts } from "./server-canvas/fonts";
 import {
   drawAyahFrame,
   drawOverlayStyle,
+  drawVignette,
   drawWatermark,
 } from "./server-canvas/canva-utils";
 import type { RenderPlanSpec, RenderChunk, PlanAyah } from "@/lib/render-plan";
@@ -467,6 +468,7 @@ export async function renderChunk(
     textGlowIntensity: numOr(rawS.textGlowIntensity, 100),
     textShadowIntensity: numOr(rawS.textShadowIntensity, 100),
     textOutlineWidth: numOr(rawS.textOutlineWidth, 3),
+    vignette: numOr(rawS.vignette, 0),
     watermarkPosition:
       typeof rawS.watermarkPosition === "string" && rawS.watermarkPosition
         ? rawS.watermarkPosition
@@ -675,6 +677,7 @@ let samples: Float32Array;
       }
     }
     drawOverlayStyle(ctx as unknown as CanvasRenderingContext2D, cw, ch, s.overlayStyle, s.bgOverlay);
+    drawVignette(ctx as unknown as CanvasRenderingContext2D, cw, ch, s.vignette ?? 0);
     drawAyahFrame(
       ctx as unknown as CanvasRenderingContext2D,
       canvas as unknown as HTMLCanvasElement,

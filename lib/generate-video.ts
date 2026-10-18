@@ -35,7 +35,7 @@ import type { Ayah, Surah, Reciter } from "@/lib/quran";
 import type { VideoSettings, Platform } from "@/lib/types";
 import { splitIntoPages } from "@/lib/verse-pages";
 import type { VersePage, WordSegments } from "@/lib/verse-pages";
-import { drawAyahFrame, drawBackground, drawOverlayStyle, drawWatermark } from "@/lib/canva-utils";
+import { drawAyahFrame, drawBackground, drawOverlayStyle, drawVignette, drawWatermark } from "@/lib/canva-utils";
 import { ensureFontsReady } from "./fonts-ready";
 import { getCachedVideoDuration } from "./video-meta";
 import {
@@ -402,6 +402,7 @@ async function renderAyahOverlays(
     // the decoded video frame + darkness overlay beneath it.
 
     drawOverlayStyle(ctx, cw, ch, settings.overlayStyle, settings.bgOverlay);
+    drawVignette(ctx, cw, ch, settings.vignette ?? 0);
     drawAyahFrame(ctx, canvas, items[i].ayah, surah, settings);
       if (settings.showWatermark && settings.watermarkText?.trim()) {
         drawWatermark(ctx, cw, ch, settings.watermarkText, settings.watermarkPosition);
