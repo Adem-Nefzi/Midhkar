@@ -1,11 +1,11 @@
 ﻿/**
- * render-chunk.ts â€” encodes ONE verse-aligned chunk of a render plan
+ * render-chunk.ts — encodes ONE verse-aligned chunk of a render plan
  * to an H.264/AAC MP4 (the old render-service/ Docker port was deleted)
  * (cumulative segments, alpha-sum-1 crossfades, bg seams, bitrate
  * ladder, x264 memory-diet profile). Identical encode parameters on
- * every chunk â†’ the MP4s concat losslessly.
+ * every chunk → the MP4s concat losslessly.
  */
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,7 +24,6 @@ import { applyAyahDeclick, applyBookendFades } from "@/lib/audio-fades";
 
 const RENDER_FPS = 30;
 const TRANSITION_WINDOW_FRAMES = 8;
-const BOOKEND_FADE_FRAMES = 6;
 const SEAM_FRAMES = 10;
 const FALLBACK_DUR = 6;
 const SAMPLE_RATE = 48000;
@@ -71,8 +70,30 @@ async function fetchAudioBuffer(urls: string[]): Promise<Buffer | null> {
   return null;
 }
 
+/* Concurrency-limited async map — index-aligned results. */
+async function asyncPool<T, R>(
+  limit: number,
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  let next = 0;
+  const results: R[] = new Array(items.length);
+  const run = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  /* Promise.all resolves with the RUNS' void return values, never with
+     the filled array — results must be returned explicitly. */
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => run()),
+  );
+  return results;
+}
+
 /** Decode any audio to mono 48kHz f32le PCM. Rejects on decode failure
- *  (non-zero exit / no samples) â€” a silent empty buffer would delete
+ *  (non-zero exit / no samples) — a silent empty buffer would delete
  *  that verse's audio and desync the whole video. */
 function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
@@ -123,9 +144,9 @@ function decodeAudioPcm(input: Buffer): Promise<Float32Array> {
   });
 }
 
-/* â”€â”€ Bg frames â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
- * Frames are extracted as JPEG (mjpeg) â€” ~10x smaller than PNG at
- * 1080Ã—1920 â€” and kept as encoded buffers; they are decoded to RGBA
+/* ── Bg frames ──────────────────────────────────────────────────
+ * Frames are extracted as JPEG (mjpeg) — ~10x smaller than PNG at
+ * 1080×1920 — and kept as encoded buffers; they are decoded to RGBA
  * on demand with a small LRU cache. Storing PNG + pre-decoding every
  * frame needs multi-GB on a 2GB function.
  * JPEG streams are parsed on the EOI marker (FFD9), robust to
@@ -185,7 +206,7 @@ function extractBgFrames(
     proc.on("error", (e) => finish(new Error("bg frame extraction failed: " + e.message)));
     proc.on("close", (code) => {
       /* Exit code is the truth: a 403/timeout/demux failure must NOT
-       * resolve as "0 frames" â€” callers would render black video. */
+       * resolve as "0 frames" — callers would render black video. */
       if ((code ?? -1) !== 0) {
         finish(new Error(`bg extraction failed (${code}): ${stderr.slice(-200)}`));
         return;
@@ -236,7 +257,7 @@ async function probeDuration(src: string): Promise<number> {
   return d;
 }
 
-/* â”€â”€ Binaries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Binaries ──────────────────────────────────────────────────── */
 
 function ffmpegBin(): string {
   return (ffmpegStatic as unknown as string) || "ffmpeg";
@@ -278,7 +299,7 @@ function drawFallbackBg(
   ctx.fillRect(0, 0, cw, ch);
 }
 
-/* â”€â”€ Resolution / bitrate (mirror device-profile) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Resolution / bitrate (mirror device-profile) ─────────────── */
 
 function outputResolution(aspect: string, isLowPower: boolean) {
   if (isLowPower) {
@@ -392,11 +413,16 @@ function boundaryFor(
   trailFrames: number,
   transitionStyle: string,
   isPage = false,
+  revealAnimation = "fade",
 ): { pre: number; post: number } {
   const TW = TRANSITION_WINDOW_FRAMES;
-  /* Page boundary inside one verse: always crossfade, split evenly
-     (matches encode.worker.ts computeBoundaries — no silence to hide in). */
-  if (isPage) return { pre: Math.floor(TW / 2), post: TW - Math.floor(TW / 2) };
+  /* Page boundary inside one verse: hard cut when the user picked
+     "cut" (matches encode.worker.ts computeBoundaries), otherwise
+     crossfade split evenly — no silence to hide in. */
+  if (isPage) {
+    if (revealAnimation === "cut") return { pre: 0, post: 0 };
+    return { pre: Math.floor(TW / 2), post: TW - Math.floor(TW / 2) };
+  }
   if (transitionStyle === "none") return { pre: 0, post: 0 };
   const trail = Math.max(0, trailFrames);
   if (trail >= TW) return { pre: TW, post: 0 };
@@ -404,7 +430,15 @@ function boundaryFor(
   return { pre: Math.floor(TW / 2), post: TW - Math.floor(TW / 2) };
 }
 
-/* â”€â”€ The chunk render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── The chunk render ─────────────────────────────────────────── */
+
+/* Crossfade alpha easing (transitionCurve = "ease") — smooth S-curve
+   instead of a linear ramp. Mirrors encode.worker.ts exactly; both
+   engines must apply it at the same t so chunk seams lose no
+   lockstep. */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
 
 /* ── Bg relay signal ────────────────────────────────────────────
  * Thrown when bg videos were selected but every clip failed to
@@ -432,7 +466,7 @@ export async function renderChunk(
   noBg = false,
 ): Promise<Buffer> {
   ensureFonts();
-  /* The wire settings ARE the app's VideoSettings â€” the vendor copy
+  /* The wire settings ARE the app's VideoSettings — the vendor copy
      expects that exact shape. Numeric fields fall back to defaults so
      a sparse spec can never produce NaN inside canvas ops. */
   const rawS = spec.settings as unknown as VideoSettings;
@@ -465,6 +499,12 @@ export async function renderChunk(
     )
       ? rawS.transitionStyle
       : "fade",
+    transitionCurve: rawS.transitionCurve === "ease" ? "ease" : "linear",
+    revealAnimation: rawS.revealAnimation === "cut" ? "cut" : "fade",
+    bgMotion: rawS.bgMotion === "zoom" ? "zoom" : "none",
+    outputFps: rawS.outputFps === 30 ? 30 : 60,
+    audioGain: Math.min(200, Math.max(50, numOr(rawS.audioGain, 100))),
+    bookendFadeSec: Math.min(2, Math.max(0, numOr(rawS.bookendFadeSec, 0.2))),
     textGlowIntensity: numOr(rawS.textGlowIntensity, 100),
     textShadowIntensity: numOr(rawS.textShadowIntensity, 100),
     textOutlineWidth: numOr(rawS.textOutlineWidth, 3),
@@ -481,45 +521,161 @@ export async function renderChunk(
         : "balanced",
   };
   const { cw, ch } = outputResolution(spec.platform.aspect, spec.quality.isLowPower);
-  const outputFps = spec.quality.isLowPower ? 30 : 60;
+  const outputFps = (s.outputFps as number) === 30 ? 30 : 60;
   const bitrate = videoBitrate(cw, ch, spec.quality.isLowPower);
 
-  /* 1. Audio */
+  /* Parallel phases: audio fetch/decode, bg extraction and overlay
+     painting used to run strictly back-to-back; each is subprocess or
+     decode bound, so overlap them. Progress is monotone — with
+     concurrent phases the client must never see the pct go backwards. */
+  let lastPct = 0;
+  const progress = (msg: string, pct: number): void => {
+    lastPct = Math.max(lastPct, Math.round(pct));
+    onProgress(msg, lastPct);
+  };
   const surahNo = Number(spec.surah.number);
   const verseSpacing = (s.verseSpacing as number) || 0;
   const ayahs = spec.ayahs.slice(chunk.from, chunk.to + 1);
-  const buffers: Float32Array[] = [];
-  const durations: { totalSec: number; trailSec: number }[] = [];
-  for (let i = 0; i < ayahs.length; i++) {
-    if (signal.aborted) throw new Error("Aborted");
-    const raw = await fetchAudioBuffer(
-      audioUrlCandidates(spec.reciter, surahNo, ayahs[i].numberInSurah),
+
+  const bgUrlSources: (string | Buffer)[] =
+    bgUploads.length > 0
+      ? bgUploads.map((u) => Buffer.from(u))
+      : !noBg && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0
+        ? [...(spec.bg.urls ?? [])]
+        : [];
+  const hasBgIntent = bgUrlSources.length > 0;
+
+  const BG_HARD_CAP = 900; /* 900 JPEGs @1080×1920 ≈ ≤540MB stored */
+  let bgFramesList: Buffer[][] = [];
+  let bgTotal = 0;
+  let hasBgVideo = false;
+  let bgDarkenAlpha = 0;
+  /* Background extraction overlaps the audio pool below. The frame
+     budget uses the CLIENT-provided durations (the server hasn't
+     measured the audio yet) + a 2s margin; an undershoot just makes
+     the playlist wrap a little sooner (modulo is safe). */
+  const bgPhase = (async (): Promise<void> => {
+    if (!hasBgIntent) return;
+    progress("Preparing background…", 27);
+    const bgWasRelayed = bgUploads.length > 0;
+    const cap = spec.quality.isLowPower ? 1200 : 2400;
+    const provisionalFrames = Math.max(
+      1,
+      Math.ceil(
+        (ayahs.reduce((a, x) => a + (x.durationSec || 0), 0) +
+          ayahs.length * verseSpacing +
+          2) *
+          RENDER_FPS,
+      ),
     );
-    if (!raw) {
+    const budget = Math.min(
+      cap * bgUrlSources.length,
+      provisionalFrames + 64,
+      BG_HARD_CAP,
+    );
+    const durations2 = await asyncPool(4, bgUrlSources, async (u) => {
+      if (typeof u !== "string") return 0; /* uploaded bytes — even split */
+      try {
+        return await probeDuration(u);
+      } catch {
+        return 0;
+      }
+    });
+    const known = durations2.filter((d) => d > 0);
+    const alloc = durations2.map((d) => {
+      if (known.length === 0)
+        return Math.min(cap, Math.max(30, Math.floor(budget / durations2.length)));
+      if (d <= 0) return 30;
+      const sum = known.reduce((a, b) => a + b, 0);
+      return Math.max(30, Math.min(cap, Math.round((budget * d) / sum)));
+    });
+    const extracted = await asyncPool(
+      2,
+      bgUrlSources,
+      async (src, i): Promise<Buffer[]> => {
+        if (signal.aborted) throw new Error("Aborted");
+        progress(
+          `Decoding backgrounds ${i + 1}/${bgUrlSources.length}…`,
+          30,
+        );
+        let frames: Buffer[] | null = null;
+        for (let attempt = 0; attempt < 2 && !frames; attempt++) {
+          try {
+            frames = await extractBgFrames(src, cw, ch, alloc[i]);
+            if (frames.length === 0) frames = null; /* 0 frames = failure */
+          } catch (err) {
+            if (attempt === 1) {
+              console.warn(
+                `[render] bg clip ${i} failed twice — dropping:`,
+                err instanceof Error ? err.message : err,
+              );
+            }
+          }
+        }
+        return frames && frames.length > 0 ? frames : [];
+      },
+    );
+    bgFramesList = extracted.filter((f) => f.length > 0);
+    if (bgFramesList.length === 0) {
+      if (!bgWasRelayed && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0) {
+        /* Server can't reach the CDN (likely 403 on the datacenter IP)
+         * — tell the client to relay the bytes and retry. */
+        throw new BgUnavailableError(spec.bg.urls?.length ?? 0);
+      }
       console.warn(
-        `[render] audio fetch failed for ${spec.surah.number}:${ayahs[i].numberInSurah} â€” using ${FALLBACK_DUR}s silence`,
+        `[render] all ${bgUrlSources.length} bg clips failed — rendering gradient fallback`,
       );
     }
-let samples: Float32Array;
-    try {
-      samples = raw
-        ? await decodeAudioPcm(raw)
-        : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
-    } catch (err) {
-      console.warn(
-        `[render] audio decode failed for ${spec.surah.number}:${ayahs[i].numberInSurah} — using ${FALLBACK_DUR}s silence:`,
-        err instanceof Error ? err.message : err,
+    bgTotal = bgFramesList.reduce((a, f) => a + f.length, 0);
+    hasBgVideo = bgTotal > 0;
+    bgDarkenAlpha = hasBgVideo ? Math.min(0.8, (s.bgOverlay as number) / 100) : 0;
+  })();
+  /* If the audio pool rejects first (abort), bgPhase might still
+     reject later — pre-attach so it can never be unhandled; the REAL
+     await below re-throws the original error. */
+  void bgPhase.catch(() => {});
+
+  /* 1. Audio — decoded 4-at-a-time while bg extraction runs above. */
+  const audioPhase = asyncPool(
+    4,
+    ayahs,
+    async (ayah, i): Promise<Float32Array> => {
+      if (signal.aborted) throw new Error("Aborted");
+      const raw = await fetchAudioBuffer(
+        audioUrlCandidates(spec.reciter, surahNo, ayah.numberInSurah),
       );
-      samples = new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
-    }
-    applyAyahDeclick(samples);
-    buffers.push(samples);
-    durations.push({ totalSec: samples.length / SAMPLE_RATE, trailSec: verseSpacing });
-    onProgress(
-      `Audio ${i + 1}/${ayahs.length}`,
-      5 + Math.round(((i + 1) / ayahs.length) * 20),
-    );
-  }
+      if (!raw) {
+        console.warn(
+          `[render] audio fetch failed for ${spec.surah.number}:${ayah.numberInSurah} — using ${FALLBACK_DUR}s silence`,
+        );
+      }
+      let samples: Float32Array;
+      try {
+        samples = raw
+          ? await decodeAudioPcm(raw)
+          : new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
+      } catch (err) {
+        console.warn(
+          `[render] audio decode failed for ${spec.surah.number}:${ayah.numberInSurah} — using ${FALLBACK_DUR}s silence:`,
+          err instanceof Error ? err.message : err,
+        );
+        samples = new Float32Array(FALLBACK_DUR * SAMPLE_RATE);
+      }
+      applyAyahDeclick(samples);
+      progress(
+        `Audio ${i + 1}/${ayahs.length}`,
+        5 + Math.round(((i + 1) / ayahs.length) * 20),
+      );
+      return samples;
+    },
+  );
+  const buffers = await audioPhase;
+  const durations: { totalSec: number; trailSec: number }[] = buffers.map(
+    (samples) => ({
+      totalSec: samples.length / SAMPLE_RATE,
+      trailSec: verseSpacing,
+    }),
+  );
 
   const totalDurSec = durations.reduce((a, d) => a + d.totalSec + d.trailSec, 0);
   const totalSamples = Math.round(totalDurSec * SAMPLE_RATE);
@@ -530,8 +686,13 @@ let samples: Float32Array;
     offset += buffers[i].length + Math.round(durations[i].trailSec * SAMPLE_RATE);
   }
 
-  /* Apply bookend fades to the full audio track (match video bookend fades) */
-  applyBookendFades(track);
+  /* Audio loudness (50–200%), then bookend fades at the configured
+     length (matches the video bookend fade duration). */
+  if ((s.audioGain ?? 100) !== 100) {
+    const gain = (s.audioGain as number) / 100;
+    for (let i = 0; i < track.length; i++) track[i] *= gain;
+  }
+  applyBookendFades(track, (s.bookendFadeSec ?? 0.2) as number);
 
   /* 2. Page plans + segments.
    * Each ayah's client-planned pages (long-verse pager) are scaled to the
@@ -557,83 +718,14 @@ let samples: Float32Array;
   }
   const { segments, totalFrames } = buildSegments(segDurations, RENDER_FPS);
 
-  /* 3. Bg playlist frames.
-   * Memory-bounded: JPEG-encoded frames only (decoded on demand in
-   * the compositing loop, LRU-cached), hard cap on total stored
-   * frames so a 2GB function never OOMs. A clip that fails to
-   * extract after one retry is DROPPED. When the client has RELAYED
-   * the bg bytes (bg-relay-*) those buffers are the source of truth;
-   * if any clip still fails with relayed bytes it is a decode
-   * problem, not a fetch problem — no relay loop. If NO relayed bytes
-   * exist and EVERY URL clip fails (Pexels 403s datacenter IPs),
-   * throw BgUnavailableError so the client can relay and retry. */
-  onProgress("Preparing background…", 30);
-  const bgUrlSources: (string | Buffer)[] =
-    bgUploads.length > 0
-      ? bgUploads.map((u) => Buffer.from(u))
-      : !noBg && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0
-        ? [...(spec.bg.urls ?? [])]
-        : [];
-  const bgWasRelayed = bgUploads.length > 0;
-  const BG_HARD_CAP = 900; /* 900 JPEGs @1080×1920 ≈ ≤540MB stored */
-  const bgFramesList: Buffer[][] = [];
-  if (bgUrlSources.length > 0) {
-    const cap = spec.quality.isLowPower ? 1200 : 2400;
-    const budget = Math.min(cap * bgUrlSources.length, totalFrames + 64, BG_HARD_CAP);
-    const durations2: number[] = [];
-    for (const u of bgUrlSources) {
-      if (typeof u === "string") {
-        try {
-          durations2.push(await probeDuration(u));
-        } catch {
-          durations2.push(0);
-        }
-      } else {
-        durations2.push(0); /* uploaded bytes — even split */
-      }
-    }
-    const known = durations2.filter((d) => d > 0);
-    const alloc = durations2.map((d) => {
-      if (known.length === 0) return Math.min(cap, Math.max(30, Math.floor(budget / durations2.length)));
-      if (d <= 0) return 30;
-      const sum = known.reduce((a, b) => a + b, 0);
-      return Math.max(30, Math.min(cap, Math.round((budget * d) / sum)));
-    });
-    for (let i = 0; i < bgUrlSources.length; i++) {
-      if (signal.aborted) throw new Error("Aborted");
-      onProgress(`Decoding backgrounds ${i + 1}/${bgUrlSources.length}…`, 34);
-      let frames: Buffer[] | null = null;
-      for (let attempt = 0; attempt < 2 && !frames; attempt++) {
-        try {
-          frames = await extractBgFrames(bgUrlSources[i], cw, ch, alloc[i]);
-          if (frames.length === 0) frames = null; /* 0 frames = failure */
-        } catch (err) {
-          if (attempt === 1) {
-            console.warn(
-              `[render] bg clip ${i} failed twice — dropping:`,
-              err instanceof Error ? err.message : err,
-            );
-          }
-        }
-      }
-      if (frames && frames.length > 0) bgFramesList.push(frames);
-    }
-    if (bgFramesList.length === 0) {
-      if (!bgWasRelayed && spec.bg.mode === "pexels" && (spec.bg.urls?.length ?? 0) > 0) {
-        /* Server can't reach the CDN (likely 403 on the datacenter IP)
-         * — tell the client to relay the bytes and retry. */
-        throw new BgUnavailableError(spec.bg.urls?.length ?? 0);
-      }
-      console.warn(
-        `[render] all ${bgUrlSources.length} bg clips failed — rendering gradient fallback`,
-      );
-    }
-  }
-  const bgTotal = bgFramesList.reduce((a, f) => a + f.length, 0);
-  const hasBgVideo = bgTotal > 0;
-  const bgDarkenAlpha = hasBgVideo ? Math.min(0.8, (s.bgOverlay as number) / 100) : 0;
+  /* 3. (bg frames extracted in bgPhase above — ran concurrently with
+   * audio + overlay painting) */
 
-  /* 4. Overlays */
+  /* 4. Overlays — painted to raw canvases (no PNG encode/decode
+   * roundtrip; napi-rs drawImage accepts a Canvas directly) and
+   * painted CONCURRENTLY with bgPhase. The baked bg decision is
+   * provisional (intent-based); if the actual bg outcome flips, the
+   * flat overlays are repainted once before compositing. */
   const surah = {
     number: surahNo,
     name: spec.surah.name,
@@ -644,20 +736,31 @@ let samples: Float32Array;
   };
   const transitionStyle = s.transitionStyle;
   const transitionEnabled = transitionStyle !== "none";
+  /* Bookend fade length follows the audio setting (0.2s = the old
+     fixed 6 frames @30fps). */
+  const bookendFadeFrames = Math.max(
+    0,
+    Math.round(((s.bookendFadeSec ?? 0.2) as number) * RENDER_FPS),
+  );
+  /* Crossfade alpha easing — linear by default. */
+  const curveT = (t: number): number =>
+    s.transitionCurve === "ease" ? easeInOutCubic(t) : t;
+  let bakedStatic = !hasBgIntent; /* overlays carry the gradient? */
+  const overlayImages: Canvas[] = [];
 
-  const renderOverlay = async (
+  const renderOverlay = (
     item: {
       numberInSurah: number;
       text: string;
       translation: string;
       pageInfo?: { index: number; total: number };
     },
-  ): Promise<Awaited<ReturnType<typeof loadImage>>> => {
+  ): Canvas => {
     const canvas = createCanvas(cw, ch);
     const ctx = canvas.getContext("2d");
     /* Video backgrounds keep the overlay transparent; static bgs bake
        the default gradient (mirrors renderAyahOverlays client-side). */
-    if (!hasBgVideo) {
+    if (bakedStatic) {
       const g = ctx.createLinearGradient(0, 0, cw, ch);
       g.addColorStop(0, "#09090f");
       g.addColorStop(0.5, "#120d03");
@@ -695,44 +798,74 @@ let samples: Float32Array;
       s,
       1,
     );
-    return loadImage(canvas.toBuffer("image/png"));
+    return canvas;
   };
 
-  const overlayImages: (Awaited<ReturnType<typeof loadImage>> | null)[] = [];
   const overlayTotal = pagePlans.reduce((a, pl) => a + pl.length, 0);
-  let overlayDone = 0;
-  for (const pl of pagePlans) {
-    for (const pg of pl) {
-      if (signal.aborted) throw new Error("Aborted");
-      overlayImages.push(await renderOverlay(pg));
-      overlayDone++;
-      onProgress(
-        `Rendering overlay ${overlayDone}/${overlayTotal}`,
-        36 + Math.round((overlayDone / overlayTotal) * 8),
-      );
+  const paintOverlays = async (): Promise<void> => {
+    overlayImages.length = 0;
+    let overlayDone = 0;
+    for (const pl of pagePlans) {
+      for (const pg of pl) {
+        if (signal.aborted) throw new Error("Aborted");
+        overlayImages.push(renderOverlay(pg));
+        overlayDone++;
+        progress(
+          `Rendering overlay ${overlayDone}/${overlayTotal}`,
+          36 + Math.round((overlayDone / overlayTotal) * 8),
+        );
+        /* napi canvas ops are sync CPU — yield so the ffmpeg children
+           (audio decode / bg extraction) can make progress between
+           overlays instead of starving them. */
+        if (overlayDone % 2 === 0) {
+          await new Promise<void>((r) => setImmediate(r));
+        }
+      }
     }
-  }
+  };
 
   /* Chunk-seam neighbours: the verse crossfade AT a chunk boundary
      needs the verse just OUTSIDE this chunk so the fade continues
      across concat (previous chunk renders the outgoing half with the
      same boundary math — t stays continuous). For paged verses the
      neighbour is the LAST page (before) / FIRST page (after). */
-  let prevOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
-  let nextOverlay: Awaited<ReturnType<typeof loadImage>> | null = null;
-  if (transitionEnabled && chunk.from > 0) {
-    const prevAyah = spec.ayahs[chunk.from - 1];
-    const pl = planPagesFor(prevAyah, prevAyah.durationSec);
-    prevOverlay = await renderOverlay(pl[pl.length - 1]);
-  }
-  if (transitionEnabled && chunk.to + 1 < spec.ayahs.length) {
-    const nextAyah = spec.ayahs[chunk.to + 1];
-    const pl = planPagesFor(nextAyah, nextAyah.durationSec);
-    nextOverlay = await renderOverlay(pl[0]);
+  let prevOverlay: Canvas | null = null;
+  let nextOverlay: Canvas | null = null;
+  const paintNeighbours = (): void => {
+    prevOverlay = null;
+    nextOverlay = null;
+    if (transitionEnabled && chunk.from > 0) {
+      const prevAyah = spec.ayahs[chunk.from - 1];
+      const pl = planPagesFor(prevAyah, prevAyah.durationSec);
+      prevOverlay = renderOverlay(pl[pl.length - 1]);
+    }
+    if (transitionEnabled && chunk.to + 1 < spec.ayahs.length) {
+      const nextAyah = spec.ayahs[chunk.to + 1];
+      const pl = planPagesFor(nextAyah, nextAyah.durationSec);
+      nextOverlay = renderOverlay(pl[0]);
+    }
+  };
+
+  const overlaysPhase = (async (): Promise<void> => {
+    await paintOverlays();
+    paintNeighbours();
+  })();
+
+  await Promise.all([bgPhase, overlaysPhase]);
+  if (bakedStatic === hasBgVideo) {
+    /* painted gradient but video exists (double-darkening), or
+       overlays left transparent but no video produced (black frames)
+       — repaint once with the ACTUAL outcome. */
+    bakedStatic = !hasBgVideo;
+    console.warn(
+      `[render] bg mismatch (intent=${hasBgIntent}, got=${hasBgVideo}) — repainting overlays`,
+    );
+    await paintOverlays();
+    paintNeighbours();
   }
 
   /* 5. Composite + encode via FFmpeg pipe */
-  onProgress("Encoding chunkâ€¦", 48);
+  onProgress("Encoding chunk…", 48);
   const x264Level = cw * ch >= 2073600 ? "4.2" : cw * ch >= 1166400 ? "4.0" : cw * ch >= 921600 ? "3.2" : "3.1";
   const outPath = join(
     tmpdir(),
@@ -797,7 +930,7 @@ let samples: Float32Array;
   const cctx = composite.getContext("2d");
 
   const drawOverlayImg = (
-    img: Awaited<ReturnType<typeof loadImage>> | null,
+    img: Canvas | null,
     alpha: number,
     dy: number,
     scale: number,
@@ -814,8 +947,8 @@ let samples: Float32Array;
     cctx.globalAlpha = 1;
   };
 
-  /* On-demand bg JPEG decode with a small LRU cache â€” NEVER hold all
-   * frames decoded (RGBA @1080Ã—1920 â‰ˆ 8.3MB each; 900 would be 7.5GB).
+  /* On-demand bg JPEG decode with a small LRU cache — NEVER hold all
+   * frames decoded (RGBA @1080×1920 ≈ 8.3MB each; 900 would be 7.5GB).
    * Cache covers the seam-lookahead window (current + next clip's
    * first frame + a working set of recently used frames). */
   const BG_CACHE_SIZE = 24;
@@ -855,7 +988,7 @@ let samples: Float32Array;
     (seg, i) => {
       const isLastSeg = i === segments.length - 1;
       if (!isLastSeg && segments[i + 1].page) {
-        return boundaryFor(0, transitionStyle, true);
+        return boundaryFor(0, transitionStyle, true, (s.revealAnimation as string) ?? "fade");
       }
       if (!transitionEnabled) return null;
       if (!isLastSeg || chunk.to + 1 < spec.ayahs.length) {
@@ -893,7 +1026,7 @@ let samples: Float32Array;
 
       if (hasBgVideo) {
         const g = segStart + k;
-        /* bgTotal > 0 here (hasBgVideo is derived from it) â€” the
+        /* bgTotal > 0 here (hasBgVideo is derived from it) — the
          * modulo is safe. A failed decode draws the gradient. */
         let pos = g % bgTotal;
         let clip = 0;
@@ -909,14 +1042,24 @@ let samples: Float32Array;
           pos -= bgFramesList[i].length;
         }
         if (!found) {
-          /* Index arithmetic gone wrong â€” paint gradient, never NaN. */
+          /* Index arithmetic gone wrong — paint gradient, never NaN. */
           clip = bgFramesList.length - 1;
           local = bgFramesList[clip].length - 1;
         }
         const imgs = bgFramesList[clip];
         const img = await bgDecode(clip, local);
+        /* Ken-Burns push-in (optional): 1 → 1.045 across one wallpaper
+           pass (matches encode.worker.ts; `g % bgTotal` is the pass
+           position — `pos` above is reduced to a clip-local index). */
+        const z = s.bgMotion === "zoom" ? 1 + 0.045 * ((g % bgTotal) / bgTotal) : 1;
         if (img) {
-          cctx.drawImage(img, 0, 0, cw, ch);
+          if (z !== 1) {
+            const w = cw * z;
+            const h = ch * z;
+            cctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
+          } else {
+            cctx.drawImage(img, 0, 0, cw, ch);
+          }
           const intoSeam = imgs.length - local;
           const nextClip = clip + 1 < bgFramesList.length ? clip + 1 : 0;
           if (
@@ -929,7 +1072,13 @@ let samples: Float32Array;
               const t = (SEAM_FRAMES - intoSeam + 1) / (SEAM_FRAMES + 1);
               if (t < 1) {
                 cctx.globalAlpha = Math.min(1, t);
-                cctx.drawImage(next, 0, 0, cw, ch);
+                if (z !== 1) {
+                  const w = cw * z;
+                  const h = ch * z;
+                  cctx.drawImage(next, (cw - w) / 2, (ch - h) / 2, w, h);
+                } else {
+                  cctx.drawImage(next, 0, 0, cw, ch);
+                }
                 cctx.globalAlpha = 1;
               }
             }
@@ -954,16 +1103,15 @@ let samples: Float32Array;
       let oldAlpha = 1;
       let newAlpha = 1;
       let transformT = 1;
-      let oldImg: (Awaited<ReturnType<typeof loadImage>> | null) = null;
-      let newImg: (Awaited<ReturnType<typeof loadImage>> | null) =
-        overlayImages[segIdx];
+      let oldImg: Canvas | null = null;
+      let newImg: Canvas | null = overlayImages[segIdx];
 
       if (incomingPost > 0 && k < incomingPost) {
         const prev =
           segIdx > 0 ? overlayImages[segIdx - 1] : prevOverlay;
         if (prev && inB) {
           const totalW = inB.pre + inB.post;
-          const t = (inB.pre + k + 1) / (totalW + 1);
+          const t = curveT((inB.pre + k + 1) / (totalW + 1));
           oldImg = prev;
           oldAlpha = 1 - t;
           newAlpha = t;
@@ -980,8 +1128,9 @@ let samples: Float32Array;
             : nextOverlay;
         if (next && outB) {
           const totalW = outB.pre + outB.post;
-          const t =
-            (k - (seg.totalFrames - outgoingPre) + 1) / (totalW + 1);
+          const t = curveT(
+            (k - (seg.totalFrames - outgoingPre) + 1) / (totalW + 1),
+          );
           oldImg = overlayImages[segIdx];
           oldAlpha = 1 - t;
           newImg = next;
@@ -994,14 +1143,14 @@ let samples: Float32Array;
       /* Bookend fades only at the true start/end of the whole video —
          chunk seams stay flat or the seams would visibly pulse. */
       let bookend = 1;
-      if (transitionEnabled) {
+      if (transitionEnabled && bookendFadeFrames > 0) {
         const globalIdx = segStart + k;
-        if (isFirstChild && globalIdx < BOOKEND_FADE_FRAMES) {
-          bookend = (globalIdx + 1) / (BOOKEND_FADE_FRAMES + 1);
+        if (isFirstChild && globalIdx < bookendFadeFrames) {
+          bookend = (globalIdx + 1) / (bookendFadeFrames + 1);
         }
         const fromEnd = totalFrames - 1 - globalIdx;
-        if (isLastChild && fromEnd < BOOKEND_FADE_FRAMES) {
-          bookend = Math.min(bookend, (fromEnd + 1) / (BOOKEND_FADE_FRAMES + 1));
+        if (isLastChild && fromEnd < bookendFadeFrames) {
+          bookend = Math.min(bookend, (fromEnd + 1) / (bookendFadeFrames + 1));
         }
       }
 
@@ -1021,7 +1170,7 @@ let samples: Float32Array;
       }
 
       /* A/V SYNC: write each unique frame ONCE. The rawvideo input is
-       * declared RENDER_FPS (30) and the output -r outputFps (60) â€”
+       * declared RENDER_FPS (30) and the output -r outputFps (60) —
        * ffmpeg's frame duplication produces the 60fps track with EXACT
        * timestamps. Manually writing each frame twice (the old code)
        * declared 2x frames to a 30fps stdin, doubling video duration
@@ -1045,7 +1194,7 @@ let samples: Float32Array;
 
   proc.stdin.end();
 
-  onProgress("Finalisingâ€¦", 94);
+  onProgress("Finalising…", 94);
   let stderrAll = "";
   proc.stderr.on("data", (d) => (stderrAll += d.toString()));
   const code: number = await new Promise((resolve) => {

@@ -542,13 +542,31 @@ export function VideoBuilder() {
     };
 
     const buildCloudSpec = async () => {
-      pushLog({ msg: "Measuring audio…", pct: 1 });
-      const durations = await estimateAyahDurationsSec({
-        ayahs: selectedAyahsData,
-        reciter: selectedReciter,
-        surah: selectedSurah,
-      });
-      if (!durations) throw new Error("Could not measure audio durations");
+      /* Cloud planning: qdc word timings (when present) ARE the chapter's
+         authoritative per-verse timeline for this same audio, so the
+         browser never downloads + decodes the whole selection just to
+         measure it. Chunks re-measure on the server and rescale pages to
+         that audio, so planner error can only nudge chunk split points,
+         never desync A/V. Durations feed chunk splitting, per-ayah pages
+         and the 10-min cap — exactly what the old decode pass fed. */
+      pushLog({ msg: "Planning render…", pct: 1 });
+      let durations: number[] | null = null;
+      if (verseTimings && verseTimings.size > 0) {
+        const fromTimings = selectedAyahsData.map(
+          (a) => (verseTimings.get(a.numberInSurah)?.verseMs ?? 0) / 1000,
+        );
+        if (fromTimings.every((d) => d > 0)) durations = fromTimings;
+      }
+      if (!durations) {
+        /* everyayah-only reciters have no qdc segments — decode to measure. */
+        pushLog({ msg: "Measuring audio…", pct: 1 });
+        durations = await estimateAyahDurationsSec({
+          ayahs: selectedAyahsData,
+          reciter: selectedReciter,
+          surah: selectedSurah,
+        });
+        if (!durations) throw new Error("Could not measure audio durations");
+      }
 
       const bg: {
         mode: "pexels" | "upload" | "none";

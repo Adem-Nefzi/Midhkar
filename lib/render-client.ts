@@ -289,59 +289,95 @@ export async function renderVideoCloud(
       await uploadBgFile(job.jobId, bgFile, onLog, ctrl.signal);
     }
 
-    /* 2. Chunks (sequential; idempotent per chunk) */
-    const chunkSpan = 90 / job.chunks; // 5% → 95%
-    let bgRelayed = false; /* loop-guard: relay at most once per job */
-    for (let i = 0; i < job.chunks; i++) {
+    /* 2. Chunks — INDEPENDENT serverless invocations (idempotent per
+     *    index), so up to 2 render concurrently: wall time halves while
+     *    total CPU stays the same. Vercel fluid compute queues us if the
+     *    account's concurrency is exhausted; anything queued keeps its
+     *    idempotent result. */
+    const CHUNK_CONCURRENCY = 2;
+    let doneCount = 0;
+    let lastPct = 5;
+    const reportDone = () => {
+      doneCount++;
+      lastPct = Math.round(5 + (doneCount / job.chunks) * 90); // 5% → 95%
+      onLog(`Rendered ${doneCount}/${job.chunks} part${job.chunks > 1 ? "s" : ""}…`, lastPct);
+    };
+
+    /* Single-flight bg relay: the FIRST 422 starts the browser→Blob
+     * relay; concurrent 422s await the same promise instead of racing
+     * to re-upload the same files. */
+    let relayPromise: Promise<boolean> | null = null;
+    const relayOnce = (): Promise<boolean> => {
+      if (!relayPromise) {
+        onLog(
+          "Server can't reach the background library — relaying from your browser…",
+          lastPct,
+        );
+        relayPromise = relayBgPlaylist(
+          job.jobId,
+          (spec.bg.urls ?? []).slice(0, 6),
+          onLog,
+          ctrl.signal,
+        );
+      }
+      return relayPromise;
+    };
+
+    const renderOneChunk = async (i: number): Promise<void> => {
       if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
       onLog(
         `Rendering part ${i + 1}/${job.chunks} on the server…`,
-        Math.round(5 + i * chunkSpan),
+        lastPct,
       );
+      let body: Record<string, unknown> = { jobId: job.jobId, chunk: i };
       let res = await fetch(`${API}/chunk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed }),
+        body: JSON.stringify(body),
         signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
       });
 
       /* 422 bg_unavailable: the Vercel datacenter IP is blocked by the
        * bg CDN (Pexels/Cloudflare 403). The BROWSER can fetch it fine
        * — relay the bytes and retry this chunk once. */
-      if (res.status === 422 && !bgRelayed && spec.bg.urls?.length) {
-        bgRelayed = true;
-        onLog("Server can't reach the background library — relaying from your browser…", 5);
-        const ok = await relayBgPlaylist(
-          job.jobId,
-          spec.bg.urls.slice(0, 6),
-          onLog,
-          ctrl.signal,
-        );
+      if (res.status === 422 && spec.bg.urls?.length) {
+        const ok = await relayOnce();
         if (!ok) {
-          onLog("Background relay failed — rendering with gradient background…", 5);
+          onLog("Background relay failed — rendering with gradient background…", lastPct);
           /* Explicit noBg: skip the CDN entirely (gradient fallback
            * server-side) — no second BgUnavailableError loop. */
-          res = await fetch(`${API}/chunk`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId: job.jobId, chunk: i, noBg: true }),
-            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
-          });
+          body = { jobId: job.jobId, chunk: i, noBg: true };
         } else {
-          res = await fetch(`${API}/chunk`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jobId: job.jobId, chunk: i, bgRelayed: true }),
-            signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
-          });
+          body = { jobId: job.jobId, chunk: i, bgRelayed: true };
         }
+        res = await fetch(`${API}/chunk`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: withTimeout(ctrl.signal, CHUNK_TIMEOUT_MS),
+        });
       }
 
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || `Chunk render failed (${res.status})`);
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error || `Chunk render failed (${res.status})`);
       }
-    }
+      reportDone();
+    };
+
+    /* Pull-pool: `CHUNK_CONCURRENCY` workers drain the chunk index list. */
+    let nextChunk = 0;
+    const pool = Array.from(
+      { length: Math.min(CHUNK_CONCURRENCY, job.chunks) },
+      async () => {
+        for (;;) {
+          const i = nextChunk++;
+          if (i >= job.chunks) return;
+          await renderOneChunk(i);
+        }
+      },
+    );
+    await Promise.all(pool);
 
     /* 3. Finalize (lossless concat + faststart) */
     if (ctrl.signal.aborted) throw new DOMException("Aborted", "AbortError");

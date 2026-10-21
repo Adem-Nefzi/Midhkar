@@ -202,6 +202,12 @@ export async function POST(request: Request) {
   st.textShadowIntensity = num(st.textShadowIntensity, 100, 0, 100);
   st.textOutlineWidth = num(st.textOutlineWidth, 3, 1, 5);
   st.vignette = num(st.vignette, 0, 0, 100);
+  st.audioGain = num(st.audioGain, 100, 50, 200);
+  st.bookendFadeSec = num(st.bookendFadeSec, 0.2, 0, 2);
+  st.transitionCurve = st.transitionCurve === "ease" ? "ease" : "linear";
+  st.revealAnimation = st.revealAnimation === "cut" ? "cut" : "fade";
+  st.bgMotion = st.bgMotion === "zoom" ? "zoom" : "none";
+  st.outputFps = st.outputFps === 30 ? 30 : 60;
   if (st.verseDisplay !== "full" && st.verseDisplay !== "auto") {
     st.verseDisplay = "auto";
   }

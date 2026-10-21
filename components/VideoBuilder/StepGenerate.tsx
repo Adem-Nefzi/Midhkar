@@ -327,7 +327,7 @@ export function StepGenerate({
                   [ar ? "الدقة" : "Resolution", `${encW}×${encH}`],
                   [
                     ar ? "معدل الإطارات" : "Frame Rate",
-                    `${deviceProfile.isLowPower ? 30 : 60} fps`,
+                    `${settings.outputFps === 30 ? 30 : 60} fps`,
                   ],
                   [ar ? "الجودة" : "Output", "H.264 MP4 + AAC"],
                   [ar ? "المدة التقريبية" : "Est. Duration", `~${estDur}s`],

@@ -618,7 +618,17 @@ export async function generateVideo(params: {
         offset += Math.round(p.trailSec * SAMPLE_RATE);
       }
     }
-    applyBookendFades(fullTrack);
+    /* Audio loudness (50–200%), then bookend fades at the configured
+       length (matches the video bookend fade). */
+    const gainPct = Math.min(200, Math.max(50, settings.audioGain ?? 100));
+    if (gainPct !== 100) {
+      const gain = gainPct / 100;
+      for (let i = 0; i < fullTrack.length; i++) fullTrack[i] *= gain;
+    }
+    applyBookendFades(
+      fullTrack,
+      Math.max(0, Math.min(2, settings.bookendFadeSec ?? 0.2)),
+    );
 
     /* ── 3. Wait for background bytes (already downloading since
        step 1a — usually already resolved). ─────────────────────── */
@@ -697,7 +707,7 @@ export async function generateVideo(params: {
       cw,
       ch,
       renderFps: FPS,
-      outputFps: profile.isLowPower ? 30 : 60,
+      outputFps: settings.outputFps === 30 ? 30 : 60,
       videoBitrate: getVideoBitrate(cw, ch, profile),
       audioBitrate: 160_000,
       sampleRate: SAMPLE_RATE,
@@ -711,6 +721,13 @@ export async function generateVideo(params: {
       bgDurations,
       fullAudioTrack: fullTrack,
       transitionStyle: settings.transitionStyle,
+      transitionCurve: settings.transitionCurve === "ease" ? "ease" : "linear",
+      revealAnimation: settings.revealAnimation === "cut" ? "cut" : "fade",
+      bgMotion: settings.bgMotion === "zoom" ? "zoom" : "none",
+      bookendFadeFrames: Math.max(
+        0,
+        Math.round(Math.max(0, Math.min(2, settings.bookendFadeSec ?? 0.2)) * FPS),
+      ),
       latencyMode: profile.latencyMode,
       bgOverlayPct: settings.bgOverlay ?? 0,
       onLog: (msg, pct) => log(msg, pct),
@@ -776,6 +793,10 @@ function startWorkerEncode(opts: {
   bgDurations: number[];
   fullAudioTrack: Float32Array;
   transitionStyle: "none" | "fade" | "slide" | "scale";
+  transitionCurve: "linear" | "ease";
+  revealAnimation: "fade" | "cut";
+  bgMotion: "none" | "zoom";
+  bookendFadeFrames: number;
   latencyMode: "quality" | "realtime";
   bgOverlayPct: number;
   onLog: (msg: string, pct: number) => void;
@@ -864,6 +885,10 @@ function startWorkerEncode(opts: {
       bgDurations: opts.bgDurations,
       fullAudioTrack: opts.fullAudioTrack.buffer as ArrayBuffer,
       transitionStyle: opts.transitionStyle,
+      transitionCurve: opts.transitionCurve,
+      revealAnimation: opts.revealAnimation,
+      bgMotion: opts.bgMotion,
+      bookendFadeFrames: opts.bookendFadeFrames,
       latencyMode: opts.latencyMode,
       bgOverlayPct: opts.bgOverlayPct,
     },

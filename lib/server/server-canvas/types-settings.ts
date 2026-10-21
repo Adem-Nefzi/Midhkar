@@ -41,6 +41,12 @@ export interface VideoSettings {
   bgColorSecondary: string;
   bgGradientAngle: number;
   transitionStyle: "none" | "fade" | "slide" | "scale";
+  revealAnimation?: "fade" | "cut";
+  bgMotion?: "none" | "zoom";
+  transitionCurve?: "linear" | "ease";
+  outputFps?: 60 | 30;
+  audioGain?: number;
+  bookendFadeSec?: number;
   patternSeed: number;
   patternFamily: "star" | "girih" | "arabesque" | "zellige" | "muqarnas" | "arch" | "border";
   patternPalette: string;

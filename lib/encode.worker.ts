@@ -94,6 +94,15 @@ export type WorkerInMessage =
         /** One continuous PCM track for the whole video, mono Float32. */
         fullAudioTrack: ArrayBuffer;
         transitionStyle: "none" | "fade" | "slide" | "scale";
+        transitionCurve: "linear" | "ease";
+        /** Verse/page reveal: crossfade (default) or hard cut ("cut"
+         *  only ever affects PAGE boundaries — never verse ones). */
+        revealAnimation: "fade" | "cut";
+        /** Optional slow Ken-Burns push-in on bg video frames. */
+        bgMotion: "none" | "zoom";
+        /** Video bookend fade length in RENDER frames (audio fades a
+         *  matching number of seconds on the main thread). */
+        bookendFadeFrames: number;
         latencyMode: "quality" | "realtime";
         /** Darkness overlay on top of the background video, 0–80 (%). */
         bgOverlayPct: number;
@@ -334,7 +343,12 @@ async function decodeBackgroundFrames(
 ══════════════════════════════════════════════════════════════ */
 
 const TRANSITION_WINDOW_FRAMES = 8; // ~270ms @30fps total crossfade length
-const BOOKEND_FADE_FRAMES = 6; // ~200ms fade at the very start/end of the video
+
+/* Crossfade alpha easing (transitionCurve = "ease"): a smooth S-curve
+   instead of a linear ramp. Mirrors the server renderer exactly — both
+   engines must apply it at the same t or the seams lose lockstep. */
+const easeInOutCubic = (t: number): number =>
+  t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
 interface Boundary {
   preFrames: number; // taken from the end of the earlier segment
@@ -344,12 +358,15 @@ interface Boundary {
 function computeBoundaries(
   segments: WorkerSegment[],
   transitionEnabled: boolean,
+  revealAnimation: "fade" | "cut",
 ): Boundary[] {
   const TW = TRANSITION_WINDOW_FRAMES;
   return segments.slice(0, -1).map((seg, i) => {
-    /* Page boundary inside one verse: always crossfade, split evenly
-       (there is no silence to hide in — the recitation is continuous). */
+    /* Page boundary inside one verse: hard cut when the user picked
+       "cut", otherwise crossfade split evenly (there is no silence to
+       hide in — the recitation is continuous). */
     if (segments[i + 1].page) {
+      if (revealAnimation === "cut") return { preFrames: 0, postFrames: 0 };
       const preFrames = Math.floor(TW / 2);
       return { preFrames, postFrames: TW - preFrames };
     }
@@ -381,6 +398,10 @@ async function runEncode(payload: StartPayload) {
     bgDurations,
     fullAudioTrack,
     transitionStyle,
+    transitionCurve,
+    revealAnimation,
+    bgMotion,
+    bookendFadeFrames,
     latencyMode,
     bgOverlayPct,
   } = payload;
@@ -537,7 +558,11 @@ async function runEncode(payload: StartPayload) {
   post({ type: "progress", msg: "Encoding video…", pct: 56 });
 
   const transitionEnabled = transitionStyle !== "none";
-  const boundaries = computeBoundaries(segments, transitionEnabled);
+  const boundaries = computeBoundaries(segments, transitionEnabled, revealAnimation);
+  const bookendFrames = Math.max(0, bookendFadeFrames);
+  /* Crossfade alpha easing — linear by default. */
+  const curveT = (t: number): number =>
+    transitionCurve === "ease" ? easeInOutCubic(t) : t;
 
   // totalFrames is the number of UNIQUE frames to render (at renderFps).
   // Each is added `frameDouble` times to the encoder for outputFps output.
@@ -594,7 +619,16 @@ async function runEncode(payload: StartPayload) {
         const cursor = pos - bgCum[i];
 
         const cur = usable[i][Math.min(cursor, usable[i].length - 1)];
-        ctx.drawImage(cur, 0, 0, cw, ch);
+        /* Ken-Burns push-in (optional): 1 → 1.045 across one wallpaper
+           pass (resets on loop), centre-anchored. */
+        const z = bgMotion === "zoom" ? 1 + 0.045 * (pos / bgTotal) : 1;
+        if (z !== 1) {
+          const w = cw * z;
+          const h = ch * z;
+          ctx.drawImage(cur, (cw - w) / 2, (ch - h) / 2, w, h);
+        } else {
+          ctx.drawImage(cur, 0, 0, cw, ch);
+        }
 
         // Tail of the slot: dissolve into the NEXT clip's first frame
         // (clip 0 on the wrap loop). Single-clip playlists skip this.
@@ -604,7 +638,13 @@ async function runEncode(payload: StartPayload) {
           const t = cursor - (bgLen[i] - seamFrames);
           const a = Math.min(1, (t + 1) / (seamFrames + 1));
           ctx.globalAlpha = a;
-          ctx.drawImage(usable[nextI][0], 0, 0, cw, ch);
+          if (z !== 1) {
+            const w = cw * z;
+            const h = ch * z;
+            ctx.drawImage(usable[nextI][0], (cw - w) / 2, (ch - h) / 2, w, h);
+          } else {
+            ctx.drawImage(usable[nextI][0], 0, 0, cw, ch);
+          }
           ctx.globalAlpha = 1;
         }
       } else if (bgDecodeFailed) {
@@ -626,7 +666,7 @@ async function runEncode(payload: StartPayload) {
       if (incomingPost > 0 && f < incomingPost && prevOverlay) {
         const totalW = inB!.preFrames + inB!.postFrames;
         const k = inB!.preFrames + f;
-        const t = (k + 1) / (totalW + 1);
+        const t = curveT((k + 1) / (totalW + 1));
         oldBitmap = prevOverlay;
         oldAlpha = 1 - t;
         newBitmap = overlay;
@@ -639,21 +679,27 @@ async function runEncode(payload: StartPayload) {
       ) {
         const totalW = outB!.preFrames + outB!.postFrames;
         const kLocal = f - (seg.totalFrames - outgoingPre);
-        const t = (kLocal + 1) / (totalW + 1);
+        const t = curveT((kLocal + 1) / (totalW + 1));
         oldBitmap = overlay;
         oldAlpha = 1 - t;
         newBitmap = nextOverlay;
         newAlpha = t;
         newTransformProgress = t;
-      } else if (transitionEnabled && segIdx === 0 && f < BOOKEND_FADE_FRAMES) {
-        newAlpha = (f + 1) / (BOOKEND_FADE_FRAMES + 1);
       } else if (
         transitionEnabled &&
-        segIdx === segments.length - 1 &&
-        f >= seg.totalFrames - BOOKEND_FADE_FRAMES
+        bookendFrames > 0 &&
+        segIdx === 0 &&
+        f < bookendFrames
       ) {
-        const kk = f - (seg.totalFrames - BOOKEND_FADE_FRAMES);
-        newAlpha = 1 - (kk + 1) / (BOOKEND_FADE_FRAMES + 1);
+        newAlpha = (f + 1) / (bookendFrames + 1);
+      } else if (
+        transitionEnabled &&
+        bookendFrames > 0 &&
+        segIdx === segments.length - 1 &&
+        f >= seg.totalFrames - bookendFrames
+      ) {
+        const kk = f - (seg.totalFrames - bookendFrames);
+        newAlpha = 1 - (kk + 1) / (bookendFrames + 1);
       }
 
       if (oldBitmap && oldAlpha > 0) {

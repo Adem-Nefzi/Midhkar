@@ -62,6 +62,13 @@ export interface VideoSettings {
   bgGradientAngle: number;    // 0–360 degrees
   // NEW: Verse transition style
   transitionStyle: "none" | "fade" | "slide" | "scale";
+  // NEW: Customization toggles
+  revealAnimation: "fade" | "cut";    // verse/page entrance: crossfade (default) or hard cut
+  bgMotion: "none" | "zoom";          // slow Ken-Burns push-in on bg video frames
+  transitionCurve: "linear" | "ease"; // crossfade alpha easing
+  outputFps: 60 | 30;                 // encode fps; never changes the unique-frame rate
+  audioGain: number;                  // 50–200 % audio loudness scaling
+  bookendFadeSec: number;             // bookend audio fade seconds (default 0.2)
   // NEW: Procedural Islamic pattern background (background = "pattern")
   patternSeed: number;
   patternFamily: "star" | "girih" | "arabesque" | "zellige" | "muqarnas" | "arch" | "border";
@@ -117,6 +124,12 @@ export const DEFAULT_SETTINGS: VideoSettings = {
   bgColorSecondary: "#1a0e00",
   bgGradientAngle: 135,
   transitionStyle: "fade",
+  revealAnimation: "fade",
+  bgMotion: "none",
+  transitionCurve: "linear",
+  outputFps: 60,
+  audioGain: 100,
+  bookendFadeSec: 0.2,
   patternSeed: 108,
   patternFamily: "star",
   patternPalette: "night-gold",

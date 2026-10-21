@@ -148,6 +148,12 @@ const RESETTABLE_KEYS: (keyof VideoSettings)[] = [
   "verseDisplay",
   "textAnimation",
   "transitionStyle",
+  "revealAnimation",
+  "bgMotion",
+  "transitionCurve",
+  "outputFps",
+  "audioGain",
+  "bookendFadeSec",
   "vignette",
 ];
 
@@ -783,6 +789,49 @@ export function StepSettings({
                 />
               </Field>
 
+              {/* Palette motion — Ken-Burns push-in on bg video */}
+              <Field label={L({ en: "Background Motion", fr: "Mouvement du fond", ar: "حركة الخلفية" })}>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "none" as const, label: L({ en: "Static", fr: "Statique", ar: "ثابتة" }) },
+                    { id: "zoom" as const, label: L({ en: "Slow Zoom", fr: "Zoom lent", ar: "تقريب بطيء" }) },
+                  ].map((t) => (
+                    <ToggleBtn
+                      key={t.id}
+                      active={(settings.bgMotion ?? "none") === t.id}
+                      onClick={() => onChange("bgMotion", t.id)}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="mx-auto h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        aria-hidden="true"
+                      >
+                        <rect x="4" y="5" width="16" height="14" rx="2" />
+                        {t.id === "none" && (
+                          <path d="M10 12h4" strokeLinecap="round" />
+                        )}
+                        {t.id === "zoom" && (
+                          <>
+                            <path d="M10 10l-2 2 2 2M14 10l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />
+                          </>
+                        )}
+                      </svg>
+                      <span className="mt-0.5 block text-[13px]">{t.label}</span>
+                    </ToggleBtn>
+                  ))}
+                </div>
+                <p className="mt-1 text-[13px] text-parchment-muted/40">
+                  {L({
+                    en: "\"Slow Zoom\" gradually pushes into the background footage while recitation plays.",
+                    fr: "Le zoom lent avance progressivement dans la vidéo de fond pendant la récitation.",
+                    ar: "التقريب البطيء يتقدم تدريجياً داخل فيديو الخلفية أثناء التلاوة.",
+                  })}
+                </p>
+              </Field>
+
               {/* Frame decoration */}
               <Field label={L({ en: "Frame Decoration", fr: "Cadre décoratif", ar: "إطار الفيديو" })}>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -821,6 +870,45 @@ export function StepSettings({
                     en: "Extra seconds of silence after each ayah",
                     fr: "Secondes de silence après chaque ayah",
                     ar: "ثواني إضافية بعد كل آية",
+                  })}
+                </p>
+              </Field>
+
+              {/* Audio loudness */}
+              <Field
+                label={`${L({ en: "Volume", fr: "Volume", ar: "مستوى الصوت" })}: ${settings.audioGain ?? 100}%`}
+              >
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={10}
+                  value={settings.audioGain ?? 100}
+                  onChange={(e) => onChange("audioGain", parseInt(e.target.value))}
+                  className="slider"
+                />
+              </Field>
+
+              {/* Audio bookend fade */}
+              <Field
+                label={`${L({ en: "Opening/Closing Fade", fr: "Fondu d'ouverture/fermeture", ar: "تلاشي البداية والنهاية" })}: ${Math.round((settings.bookendFadeSec ?? 0.2) * 1000)}ms`}
+              >
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={settings.bookendFadeSec ?? 0.2}
+                  onChange={(e) =>
+                    onChange("bookendFadeSec", parseFloat(e.target.value))
+                  }
+                  className="slider"
+                />
+                <p className="mt-1 text-[13px] text-parchment-muted/40">
+                  {L({
+                    en: "Audio (and text) fade length at the very start and end of the video. 0 = no fade.",
+                    fr: "Durée du fondu audio (et texte) au tout début et à la fin. 0 = aucun fondu.",
+                    ar: "مدة تلاشي الصوت (والنص) في بداية الفيديو ونهايته. 0 = بدون تلاشي.",
                   })}
                 </p>
               </Field>
@@ -1005,6 +1093,27 @@ export function StepSettings({
                     ar: "جودة أعلى تستغرق وقتاً أطول",
                   })}
                 </p>
+              </Field>
+
+              {/* Frame rate */}
+              <Field label={L({ en: "Frame Rate", fr: "Images par seconde", ar: "معدل الإطارات" })}>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 60 as const, label: "60 fps", sub: L({ en: "Silky (default)", fr: "Fluide (défaut)", ar: "سلس (افتراضي)" }) },
+                      { id: 30 as const, label: "30 fps", sub: L({ en: "Sharper per frame", fr: "Plus net", ar: "أوضح للإطار" }) },
+                    ] as const
+                  ).map((q) => (
+                    <ToggleBtn
+                      key={q.id}
+                      active={settings.outputFps === q.id}
+                      onClick={() => onChange("outputFps", q.id)}
+                    >
+                      <span className="block text-[13px] font-semibold">{q.label}</span>
+                      <span className="mt-0.5 block text-[13px] opacity-70">{q.sub}</span>
+                    </ToggleBtn>
+                  ))}
+                </div>
               </Field>
 
               {/* ── TAB: Text ──────────────────────────────────── */}
@@ -1418,6 +1527,83 @@ export function StepSettings({
                       <span className="mt-0.5 block text-[13px]">
                         {t.label}
                       </span>
+                    </ToggleBtn>
+                  ))}
+                </div>
+              </Field>
+
+              {/* Page reveal (how a new page/verse snaps in) */}
+              <Field label={L({ en: "Page Reveal", fr: "Apparition des pages", ar: "ظهور الصفحات" })}>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "fade" as const, label: L({ en: "Fade (default)", fr: "Fondu (défaut)", ar: "تلاشي (افتراضي)" }) },
+                    { id: "cut" as const, label: L({ en: "Cut", fr: "Coupe franche", ar: "فوري" }) },
+                  ].map((t) => (
+                    <ToggleBtn
+                      key={t.id}
+                      active={(settings.revealAnimation ?? "fade") === t.id}
+                      onClick={() => onChange("revealAnimation", t.id)}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="mx-auto h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        aria-hidden="true"
+                      >
+                        {t.id === "fade" && (
+                          <>
+                            <rect x="4" y="7" width="12" height="10" rx="2" opacity="0.4" />
+                            <rect x="8" y="5" width="12" height="12" rx="2" />
+                          </>
+                        )}
+                        {t.id === "cut" && (
+                          <>
+                            <path d="M9 6v12M15 6v12" strokeLinecap="round" opacity="0.5" />
+                            <rect x="6" y="9" width="12" height="9" rx="2" />
+                          </>
+                        )}
+                      </svg>
+                      <span className="mt-0.5 block text-[13px]">{t.label}</span>
+                    </ToggleBtn>
+                  ))}
+                </div>
+                <p className="mt-1 text-[13px] text-parchment-muted">
+                  {L({
+                    en: "\"Cut\" applies to long-verse page changes only — between verses you still choose the transition above.",
+                    fr: "La coupe s'applique uniquement aux pages d'un long verset — entre versets, la transition ci-dessus reste valable.",
+                    ar: "الفوري يخص تغيّر صفحات الآية الطويلة فقط — بين الآيات يبقى الانتقال أعلاه كما اخترته.",
+                  })}
+                </p>
+              </Field>
+
+              {/* Crossfade curve */}
+              <Field label={L({ en: "Fade Curve", fr: "Courbe de fondu", ar: "منحنى التلاشي" })}>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: "linear" as const, label: L({ en: "Linear", fr: "Linéaire", ar: "خطي" }) },
+                    { id: "ease" as const, label: L({ en: "Silky", fr: "Soie", ar: "ناعم" }) },
+                  ].map((t) => (
+                    <ToggleBtn
+                      key={t.id}
+                      active={(settings.transitionCurve ?? "linear") === t.id}
+                      onClick={() => onChange("transitionCurve", t.id)}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="mx-auto h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d={t.id === "linear" ? "M4 20h16" : "M4 20C10 20 12 6 20 6"}
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                      <span className="mt-0.5 block text-[13px]">{t.label}</span>
                     </ToggleBtn>
                   ))}
                 </div>
